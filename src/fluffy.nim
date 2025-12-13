@@ -17,8 +17,6 @@ let window = newWindow(
 makeContextCurrent(window)
 loadExtensions()
 
-
-
 let sk = newSilky("dist/atlas.png", "dist/atlas.json")
 
 type
@@ -32,7 +30,7 @@ type
     panels: seq[Panel]
     split: float32
     selectedPanelNum: int
-    rect: Rect # Calculated during draw
+    rect: Rect # Calculated during draw.
 
   PanelDraw = proc(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2)
 
@@ -50,12 +48,12 @@ type
     West
 
   TraceEvent = ref object
-    name: string # name of the function or region
-    ts: float # timestamp in microseconds
-    dur: float # duration in microseconds
-    alloc: int # number of allocations
-    deloc: int # number of deallocations
-    mem: int # memory change in bytes
+    name: string # Name of the function or region.
+    ts: float # Timestamp in microseconds.
+    dur: float # Duration in microseconds.
+    alloc: int # Number of allocations.
+    deloc: int # Number of deallocations.
+    mem: int # Memory change in bytes.
 
   Trace = ref object
     displayTimeUnit: string = "ns"
@@ -124,8 +122,6 @@ proc snapToPixels(rect: Rect): Rect =
   )
 
 proc movePanels*(area: Area, panels: seq[Panel])
-
-# Logic
 proc clear*(area: Area) =
   ## Clear the area.
   for panel in area.panels:
@@ -183,7 +179,7 @@ proc insertPanel*(area: Area, panel: Panel, index: int) =
   let idx = panel.parentArea.panels.find(panel)
   var finalIndex = index
 
-  # If moving within the same area, adjust index if we're moving forward
+  # If moving within the same area, adjust index if we're moving forward.
   if panel.parentArea == area and idx != -1:
     if idx < index:
       finalIndex = index - 1
@@ -191,12 +187,12 @@ proc insertPanel*(area: Area, panel: Panel, index: int) =
   if idx != -1:
     panel.parentArea.panels.delete(idx)
 
-  # Clamp index to be safe
+  # Clamp index to be safe.
   finalIndex = clamp(finalIndex, 0, area.panels.len)
 
   area.panels.insert(panel, finalIndex)
   panel.parentArea = area
-  # Update selection to the new panel position
+  # Update selection to the new panel position.
   area.selectedPanelNum = finalIndex
 
 proc getTabInsertInfo(area: Area, mousePos: Vec2): (int, Rect) =
@@ -204,7 +200,7 @@ proc getTabInsertInfo(area: Area, mousePos: Vec2): (int, Rect) =
   var x = area.rect.x + 4
   let headerH = AreaHeaderHeight
 
-  # If no panels, insert at 0
+  # If no panels, insert at 0.
   if area.panels.len == 0:
     return (0, rect(x, area.rect.y + 4, 4, headerH - 4))
 
@@ -212,7 +208,7 @@ proc getTabInsertInfo(area: Area, mousePos: Vec2): (int, Rect) =
   var minDist = float32.high
   var bestX = x
 
-  # Check before first tab (index 0)
+  # Check before first tab (index 0).
   let dist0 = abs(mousePos.x - x)
   minDist = dist0
   bestX = x
@@ -222,7 +218,7 @@ proc getTabInsertInfo(area: Area, mousePos: Vec2): (int, Rect) =
     let textSize = sk.getTextSize("Default", panel.name)
     let tabW = textSize.x + 16
 
-    # The gap after this tab (index i + 1)
+    # The gap after this tab (index i + 1).
     let gapX = x + tabW + 2
     let dist = abs(mousePos.x - gapX)
     if dist < minDist:
@@ -236,14 +232,14 @@ proc getTabInsertInfo(area: Area, mousePos: Vec2): (int, Rect) =
 
 proc movePanels*(area: Area, panels: seq[Panel]) =
   ## Move multiple panels to this area.
-  var panelList = panels # Copy
+  var panelList = panels # Copy.
   for panel in panelList:
     area.movePanel(panel)
 
 proc split*(area: Area, layout: AreaLayout) =
   ## Split the area.
   let
-    area1 = Area(rect: area.rect) # inherit rect initially
+    area1 = Area(rect: area.rect) # Inherit rect initially.
     area2 = Area(rect: area.rect)
   area.layout = layout
   area.split = 0.5
@@ -323,10 +319,10 @@ proc drawAreaRecursive(area: Area, r: Rect) =
   if area.areas.len > 0:
     let m = AreaMargin / 2
     if area.layout == Horizontal:
-      # Top/Bottom
+      # Top/Bottom.
       let splitPos = r.h * area.split
 
-      # Handle split resizing
+      # Handle split resizing.
       let splitRect = rect(r.x, r.y + splitPos - 2, r.w, 4)
 
       if dragArea == nil and window.mousePos.vec2.overlaps(splitRect):
@@ -340,7 +336,7 @@ proc drawAreaRecursive(area: Area, r: Rect) =
       drawAreaRecursive(area.areas[1], r2)
 
     else:
-      # Left/Right
+      # Left/Right.
       let splitPos = r.w * area.split
 
       let splitRect = rect(r.x + splitPos - 2, r.y, 4, r.h)
@@ -356,15 +352,15 @@ proc drawAreaRecursive(area: Area, r: Rect) =
       drawAreaRecursive(area.areas[1], r2)
 
   elif area.panels.len > 0:
-    # Draw Panel
+    # Draw Panel.
     if area.selectedPanelNum > area.panels.len - 1:
       area.selectedPanelNum = area.panels.len - 1
 
-    # Draw Header
+    # Draw Header.
     let headerRect = rect(r.x, r.y, r.w, AreaHeaderHeight)
     sk.draw9Patch("panel.header.9patch", 3, headerRect.xy, headerRect.wh)
 
-    # Draw Tabs
+    # Draw Tabs.
     var x = r.x + 4
     sk.pushClipRect(rect(r.x, r.y, r.w - 2, AreaHeaderHeight))
     for i, panel in area.panels:
