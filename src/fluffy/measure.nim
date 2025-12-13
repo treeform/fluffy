@@ -17,11 +17,25 @@ type
     dur: float      # Optional for "X" phase
     id: string      # Optional for linking
     tts: float      # Optional thread timestamp
+    alloc: int      # Optional for allocation count
+    deloc: int      # Optional for deallocation count
+    mem: int        # Optional for memory usage
 
   Trace = ref object
     ## This must be set to "ns" for Chrome tracing to show properly.
     displayTimeUnit: string = "ns"
     traceEvents: seq[Event]
+
+  MemCounters = object
+    allocCounter: int
+    deallocCounter: int
+
+  EventStart = object
+    ## Event start time and memory usage.
+    ts: int
+    alloc: int
+    deloc: int
+    mem: int
 
 var
   measureStart: int
@@ -34,7 +48,7 @@ var
   traceTid: int
   traceCategory: string
   traceData: Trace
-  traceStartTicks: seq[int]
+  traceStarts: seq[EventStart]
 
 proc getTicks*(): int =
   ## Gets accurate time.
@@ -43,6 +57,27 @@ proc getTicks*(): int =
   else:
     getMonoTime().ticks.int
 
+when not defined(nimTypeNames):
+  {.hint: "-d:nimTypeNames must be to track allocations and deallocations".}
+  
+proc getAllocations(): int =
+  ## Gets the number of allocations.
+  when defined(nimTypeNames):
+    (cast[MemCounters](getMemCounters())).allocCounter
+  else:
+    0
+
+proc getDeallocations(): int =
+  ## Gets the number of deallocations.
+  when defined(nimTypeNames):
+    (cast[MemCounters](getMemCounters())).deallocCounter
+  else:
+    0
+
+proc getMemoryUsage(): int =
+  ## Gets the memory usage.
+  getOccupiedMem()
+
 proc startTrace*(pid = 1, tid = 1, category = "measure") =
   ## Starts a chrome://tracing compatible capture and enables tracing.
   tracingEnabled = true
@@ -50,7 +85,7 @@ proc startTrace*(pid = 1, tid = 1, category = "measure") =
   tracePid = pid
   traceTid = tid
   traceCategory = category
-  traceStartTicks.setLen(0)
+  traceStarts.setLen(0)
   if traceData.isNil:
     traceData = Trace(traceEvents: @[])
   else:
@@ -81,7 +116,12 @@ proc measurePush*(what: string) =
     measureStart = now
     measureStack.add(what)
     calls.inc(what)
-    traceStartTicks.add(now)
+    traceStarts.add(EventStart(
+      ts: now, 
+      alloc: getAllocations(), 
+      deloc: getDeallocations(),
+      mem: getMemoryUsage()
+    ))
 
 proc measurePop*() =
   ## Used by {.measure.} pragma to pop a measure section.
@@ -91,18 +131,21 @@ proc measurePop*() =
     let dt = now - measureStart
     measures.inc(key, dt)
     measureStart = now
-    if traceStartTicks.len > 0:
-      let startTick = traceStartTicks.pop()
+    if traceStarts.len > 0:
+      let start = traceStarts.pop()
       if not traceData.isNil and tracingEnabled:
         let ev = Event(
           name: key,
           ph: "X",
-          ts: (startTick - traceStartTick).float / 1000.0, # microseconds
+          ts: (start.ts - traceStartTick).float / 1000.0, # microseconds
           pid: tracePid,
           tid: traceTid,
           cat: traceCategory,
           args: newJNull(),
-          dur: (now - startTick).float / 1000.0
+          dur: (now - start.ts).float / 1000.0,
+          alloc: getAllocations() - start.alloc,
+          deloc: getDeallocations() - start.deloc,
+          mem: getMemoryUsage() - start.mem
         )
         traceData.traceEvents.add(ev)
 

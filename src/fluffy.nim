@@ -55,9 +55,12 @@ type
     West
 
   TraceEvent = ref object
-    name: string
-    ts: float
-    dur: float
+    name: string # name of the function or region
+    ts: float # timestamp in microseconds
+    dur: float # duration in microseconds
+    alloc: int # number of allocations
+    deloc: int # number of deallocations
+    mem: int # memory change in bytes
 
   Trace = ref object
     displayTimeUnit: string = "ns"
@@ -645,6 +648,9 @@ type
     totalTime: float
     selfTime: float
     count: int
+    totalAlloc: int
+    totalDeloc: int
+    totalMem: int
 
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events
@@ -658,14 +664,33 @@ proc computeTraceStats(): seq[EventStats] =
   if isSingleEvent:
     # Just the selected event
     let event = trace.traceEvents[selectedEventIndex]
-    statsMap[event.name] = EventStats(name: event.name, totalTime: event.dur, selfTime: 0.0, count: 1)
+    statsMap[event.name] = EventStats(
+      name: event.name,
+      totalTime: event.dur,
+      selfTime: 0.0,
+      count: 1,
+      totalAlloc: event.alloc,
+      totalDeloc: event.deloc,
+      totalMem: event.mem
+    )
   else:
     # All events
     for event in trace.traceEvents:
       if not statsMap.hasKey(event.name):
-        statsMap[event.name] = EventStats(name: event.name, totalTime: 0.0, selfTime: 0.0, count: 0)
+        statsMap[event.name] = EventStats(
+          name: event.name,
+          totalTime: 0.0,
+          selfTime: 0.0,
+          count: 0,
+          totalAlloc: 0,
+          totalDeloc: 0,
+          totalMem: 0
+        )
       statsMap[event.name].totalTime += event.dur
       statsMap[event.name].count += 1
+      statsMap[event.name].totalAlloc += event.alloc
+      statsMap[event.name].totalDeloc += event.deloc
+      statsMap[event.name].totalMem += event.mem
   
   # Second pass: compute self time using interval coverage algorithm
   if isSingleEvent:
@@ -787,14 +812,20 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     let headerY = sk.at.y
     let nameColX = sk.at.x
     let countColX = sk.at.x + 250
-    let totalColX = sk.at.x + 350
-    let selfColX = sk.at.x + 500
+    let totalColX = sk.at.x + 320
+    let selfColX = sk.at.x + 440
+    let allocColX = sk.at.x + 560
+    let delocColX = sk.at.x + 650
+    let memColX = sk.at.x + 740
     
     # Header
     discard sk.drawText("Default", "Event Name", vec2(nameColX, headerY), rgbx(200, 200, 200, 255))
     discard sk.drawText("Default", "Count", vec2(countColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Total Time (ms)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Self Time (ms)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Total (ms)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Self (ms)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Allocs", vec2(allocColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Delocs", vec2(delocColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Mem (B)", vec2(memColX, headerY), rgbx(200, 200, 200, 255))
     
     # Draw separator line
     let lineY = headerY + 25
@@ -816,6 +847,9 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.totalTime / 1000:.4f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.selfTime / 1000:.4f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", $stats.totalAlloc, vec2(allocColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", $stats.totalDeloc, vec2(delocColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", $stats.totalMem, vec2(memColX, rowY), rgbx(255, 255, 255, 255))
       
       rowY += 25
 
