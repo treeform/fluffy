@@ -1,6 +1,6 @@
 
 import
-  std/[random, strformat, hashes, algorithm, tables, math],
+  std/[random, strformat, hashes, algorithm, tables, math, os],
   opengl, windy, bumpy, vmath, chroma, silky, jsony
 
 # Setup Atlas
@@ -85,9 +85,6 @@ const
     parseHtmlColor("#d35400").rgbx,
     parseHtmlColor("#e74c3c").rgbx,
     parseHtmlColor("#c0392b").rgbx,
-    parseHtmlColor("#ecf0f1").rgbx,
-    parseHtmlColor("#bdc3c7").rgbx,
-    parseHtmlColor("#95a5a6").rgbx,
   ]
 
 # Globals
@@ -105,6 +102,7 @@ var
   prevNumAlloc: int
 
   trace: Trace
+  traceFilePath: string = "traces/example_trace.json"
   
   # Zoom and pan state for timeline
   timelineZoom: float = 1.0
@@ -507,7 +505,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       let zoomFactor = if window.scrollDelta.y > 0: 1.1 else: 0.9
       let oldZoom = timelineZoom
       timelineZoom *= zoomFactor
-      timelineZoom = max(0.001, min(timelineZoom, 10000.0))  # Clamp zoom
+      timelineZoom = max(0.0001, min(timelineZoom, 100000.0))  # Clamp zoom
       
       # Calculate mouse position relative to content area (normalized 0-1)
       let mouseRelX = (mousePos.x - contentPos.x) / contentSize.x
@@ -571,10 +569,10 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         
         # Format and draw label
         let label = 
-          if tickInterval >= 1_000_000.0:
-            &"{(tickTime / 1_000_000.0):.1f}ms"
-          elif tickInterval >= 1_000.0:
-            &"{(tickTime / 1_000_000.0):.4f}ms"
+          if tickInterval >= 100.0:
+            &"{(tickTime / 1000.0):.1f}ms"
+          elif tickInterval >= 1000.0:
+            &"{(tickTime / 1000.0):.4f}ms"
           else:
             &"{tickTime:.0f}ns"
         
@@ -665,8 +663,8 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     # Header
     discard sk.drawText("Default", "Event Name", vec2(nameColX, headerY), rgbx(200, 200, 200, 255))
     discard sk.drawText("Default", "Count", vec2(countColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Total Time (ns)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Self Time (ns)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Total Time (ms)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Self Time (ms)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
     
     # Draw separator line
     let lineY = headerY + 25
@@ -686,8 +684,8 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       # Draw stats
       discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 240)
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", &"{stats.totalTime:.2f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", &"{stats.selfTime:.2f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.totalTime / 1000:.2f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.selfTime / 1000:.2f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
       
       rowY += 25
 
@@ -700,6 +698,27 @@ proc drawAllocSize(panel: Panel, frameId: string, contentPos: Vec2, contentSize:
   frame(frameId, contentPos, contentSize):
     h1text("Alloc Size")
     text("This is the alloc size")
+
+proc loadTraceFile(filePath: string) =
+  ## Load a trace file and reset related state
+  try:
+    echo "Loading trace file: ", filePath
+    trace = readFile(filePath).fromJson(Trace)
+    trace.traceEvents.sort(proc(a: TraceEvent, b: TraceEvent): int =
+      return cmp(a.ts, b.ts))
+    
+    # Reset trace stats cache
+    traceStatsComputed = false
+    cachedTraceStats.setLen(0)
+    
+    # Reset zoom and pan
+    timelineZoom = 1.0
+    timelinePanOffset = 0.0
+    timelinePanning = false
+    
+    echo "Trace loaded successfully: ", trace.traceEvents.len, " events"
+  except Exception as e:
+    echo "Error loading trace file: ", e.msg
 
 proc initRootArea() =
   randomize()
@@ -718,6 +737,10 @@ proc initRootArea() =
 
 # Main Loop
 window.onFrame = proc() =
+  # Check for reload keys (F5 or Ctrl+R)
+  if window.buttonPressed[KeyF5] or (window.buttonDown[KeyLeftControl] and window.buttonPressed[KeyR]):
+    loadTraceFile(traceFilePath)
+  
   sk.beginUI(window, window.size)
 
   # Background
@@ -750,11 +773,15 @@ window.onFrame = proc() =
   if window.cursor.kind != sk.cursor.kind:
     window.cursor = sk.cursor
 
-initRootArea()
+# Parse command line arguments
+if paramCount() > 0:
+  traceFilePath = paramStr(1)
+  echo "Using trace file from command line: ", traceFilePath
+else:
+  echo "Using default trace file: ", traceFilePath
 
-trace = readFile("traces/example_trace.json").fromJson(Trace)
-trace.traceEvents.sort(proc(a: TraceEvent, b: TraceEvent): int =
-  return cmp(a.ts, b.ts))
+initRootArea()
+loadTraceFile(traceFilePath)
 
 while not window.closeRequested:
   pollEvents()
