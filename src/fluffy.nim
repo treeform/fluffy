@@ -1,6 +1,6 @@
 
 import
-  std/[random, strformat, hashes, algorithm, tables],
+  std/[random, strformat, hashes, algorithm, tables, math],
   opengl, windy, bumpy, vmath, chroma, silky, jsony
 
 # Setup Atlas
@@ -481,6 +481,21 @@ proc nameToColor(name: string): ColorRGBX =
   let hash = abs(name.hash.int)
   FlatUIColors[hash mod FlatUIColors.len]
 
+proc calculateNiceInterval(visibleDuration: float, targetTicks: int = 10): float =
+  ## Calculate a "nice" interval for timeline ticks (1, 2, 5, 10, 20, 50, etc.)
+  let roughInterval = visibleDuration / targetTicks.float
+  let magnitude = pow(10.0, floor(log10(roughInterval)))
+  let normalized = roughInterval / magnitude
+  
+  # Choose 1, 2, or 5 based on normalized value
+  let niceMult = 
+    if normalized <= 1.5: 1.0
+    elif normalized <= 3.0: 2.0
+    elif normalized <= 7.0: 5.0
+    else: 10.0
+  
+  return niceMult * magnitude
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
     let mousePos = window.mousePos.vec2
@@ -529,6 +544,45 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     let scale = baseScale * timelineZoom
     let panPixels = timelinePanOffset * contentSize.x
     
+    # Calculate visible time range for ruler
+    let visibleStartTime = firstTs - (panPixels / scale)
+    let visibleEndTime = visibleStartTime + (contentSize.x / scale)
+    let visibleDuration = visibleEndTime - visibleStartTime
+    
+    # Draw timeline ruler
+    let rulerHeight = 40.0
+    let rulerY = contentPos.y
+    sk.drawRect(vec2(contentPos.x, rulerY), vec2(contentSize.x, rulerHeight), rgbx(40, 40, 40, 255))
+    
+    # Calculate nice tick interval
+    let tickInterval = calculateNiceInterval(visibleDuration)
+    
+    # Find first tick that's visible
+    let firstTick = ceil(visibleStartTime / tickInterval) * tickInterval
+    
+    # Draw ticks and labels
+    var tickTime = firstTick
+    while tickTime <= visibleEndTime:
+      let tickX = (tickTime - firstTs) * scale + panPixels + contentPos.x
+      
+      if tickX >= contentPos.x and tickX <= contentPos.x + contentSize.x:
+        # Draw tick mark
+        sk.drawRect(vec2(tickX, rulerY + rulerHeight - 8), vec2(1, 8), rgbx(150, 150, 150, 255))
+        
+        # Format and draw label
+        let label = 
+          if tickInterval >= 1_000_000.0:
+            &"{(tickTime / 1_000_000.0):.1f}ms"
+          elif tickInterval >= 1_000.0:
+            &"{(tickTime / 1_000_000.0):.4f}ms"
+          else:
+            &"{tickTime:.0f}ns"
+        
+        let labelSize = sk.getTextSize("Default", label)
+        discard sk.drawText("Default", label, vec2(tickX - labelSize.x / 2, rulerY + 2), rgbx(200, 200, 200, 255))
+      
+      tickTime += tickInterval
+    
     var stack: seq[TraceEvent]
     const Height = 28.float
     for event in trace.traceEvents:
@@ -536,7 +590,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         discard stack.pop()
       let x = (event.ts - firstTs) * scale + panPixels
       let w = max(1, event.dur * scale)
-      let level = stack.len.float * Height;
+      let level = stack.len.float * Height + rulerHeight;
       
       # Only draw if visible in the viewport
       if x + w >= 0 and x <= contentSize.x:
