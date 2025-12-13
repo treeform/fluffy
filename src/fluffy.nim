@@ -63,8 +63,6 @@ type
     displayTimeUnit: string = "ns"
     traceEvents: seq[TraceEvent]
 
-
-
 # Constants
 const
   AreaHeaderHeight = 32.0
@@ -697,7 +695,6 @@ window.onFrame = proc() =
 
   if window.cursor.kind != sk.cursor.kind:
     window.cursor = sk.cursor
-
 
 initRootArea()
 
