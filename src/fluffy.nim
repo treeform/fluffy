@@ -115,6 +115,7 @@ var
   rangeSelectionStart: float = 0.0  # timestamp
   rangeSelectionEnd: float = 0.0    # timestamp
   rangeSelectionDragging: bool = false
+  lastRangeForStats: tuple[active: bool, start: float, finish: float] = (false, 0.0, 0.0)
   
   # Zoom and pan state for timeline
   timelineZoom: float = 1.0
@@ -698,42 +699,74 @@ type
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events
   ## If selectedEventIndex is set, compute stats only for that specific event instance
+  ## If rangeSelectionActive is true, only compute stats for events within the range
   var statsMap: Table[string, EventStats]
   
   # Check if we're filtering to a single event
   let isSingleEvent = selectedEventIndex >= 0
   
+  # Get the active range (if any)
+  let rangeStart = if rangeSelectionActive: min(rangeSelectionStart, rangeSelectionEnd) else: 0.0
+  let rangeEnd = if rangeSelectionActive: max(rangeSelectionStart, rangeSelectionEnd) else: 0.0
+  
+  # Helper to clip event time to range
+  proc clipEventToRange(eventStart, eventEnd: float): tuple[start: float, finish: float, duration: float] =
+    if not rangeSelectionActive:
+      return (eventStart, eventEnd, eventEnd - eventStart)
+    
+    let clippedStart = max(eventStart, rangeStart)
+    let clippedEnd = min(eventEnd, rangeEnd)
+    
+    if clippedStart >= clippedEnd:
+      # Event doesn't overlap with range
+      return (0.0, 0.0, 0.0)
+    
+    return (clippedStart, clippedEnd, clippedEnd - clippedStart)
+  
   # First pass: compute total time for each event name (or single event)
   if isSingleEvent:
     # Just the selected event
     let event = trace.traceEvents[selectedEventIndex]
-    statsMap[event.name] = EventStats(
-      name: event.name,
-      totalTime: event.dur,
-      selfTime: 0.0,
-      count: 1,
-      totalAlloc: event.alloc,
-      totalDeloc: event.deloc,
-      totalMem: event.mem
-    )
+    let eventEnd = event.ts + event.dur
+    let clipped = clipEventToRange(event.ts, eventEnd)
+    
+    if clipped.duration > 0:
+      statsMap[event.name] = EventStats(
+        name: event.name,
+        totalTime: clipped.duration,
+        selfTime: 0.0,
+        count: 1,
+        totalAlloc: event.alloc,
+        totalDeloc: event.deloc,
+        totalMem: event.mem
+      )
   else:
     # All events
     for event in trace.traceEvents:
-      if not statsMap.hasKey(event.name):
-        statsMap[event.name] = EventStats(
-          name: event.name,
-          totalTime: 0.0,
-          selfTime: 0.0,
-          count: 0,
-          totalAlloc: 0,
-          totalDeloc: 0,
-          totalMem: 0
-        )
-      statsMap[event.name].totalTime += event.dur
-      statsMap[event.name].count += 1
-      statsMap[event.name].totalAlloc += event.alloc
-      statsMap[event.name].totalDeloc += event.deloc
-      statsMap[event.name].totalMem += event.mem
+      let eventEnd = event.ts + event.dur
+      
+      # Skip events that don't overlap with range
+      if rangeSelectionActive and (eventEnd <= rangeStart or event.ts >= rangeEnd):
+        continue
+      
+      let clipped = clipEventToRange(event.ts, eventEnd)
+      
+      if clipped.duration > 0:
+        if not statsMap.hasKey(event.name):
+          statsMap[event.name] = EventStats(
+            name: event.name,
+            totalTime: 0.0,
+            selfTime: 0.0,
+            count: 0,
+            totalAlloc: 0,
+            totalDeloc: 0,
+            totalMem: 0
+          )
+        statsMap[event.name].totalTime += clipped.duration
+        statsMap[event.name].count += 1
+        statsMap[event.name].totalAlloc += event.alloc
+        statsMap[event.name].totalDeloc += event.deloc
+        statsMap[event.name].totalMem += event.mem
   
   # Second pass: compute self time using interval coverage algorithm
   if isSingleEvent:
@@ -744,8 +777,13 @@ proc computeTraceStats(): seq[EventStats] =
     let eventStart = event.ts
     let eventEnd = event.ts + event.dur
     
+    # Clip the event to the range
+    let clippedEvent = clipEventToRange(eventStart, eventEnd)
+    if clippedEvent.duration == 0:
+      return result
+    
     # Collect all child event time ranges (events that start within this event's duration)
-    # NOTE: We use ALL events here, not just filtered ones, for correct self-time calculation
+    # Clip children to both the parent bounds AND the range
     var childRanges: seq[tuple[start: float, finish: float]]
     
     for j in (i+1)..<trace.traceEvents.len:
@@ -755,11 +793,13 @@ proc computeTraceStats(): seq[EventStats] =
       if child.ts >= eventEnd:
         break
       
-      # If child starts within parent, add its range (clipped to parent bounds)
+      # If child starts within parent, add its range (clipped to parent bounds and range)
       if child.ts >= eventStart:
-        let childStart = child.ts
-        let childEnd = min(child.ts + child.dur, eventEnd)
-        childRanges.add((start: childStart, finish: childEnd))
+        let childStart = max(child.ts, clippedEvent.start)
+        let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
+        
+        if childEnd > childStart:
+          childRanges.add((start: childStart, finish: childEnd))
     
     # Merge overlapping child ranges to avoid double counting
     var coveredTime = 0.0
@@ -783,7 +823,7 @@ proc computeTraceStats(): seq[EventStats] =
       # Add the last merged range
       coveredTime += (mergedEnd - mergedStart)
     
-    let selfTime = event.dur - coveredTime
+    let selfTime = clippedEvent.duration - coveredTime
     statsMap[event.name].selfTime = selfTime
   else:
     # Compute self time for all events
@@ -791,7 +831,17 @@ proc computeTraceStats(): seq[EventStats] =
       let eventStart = event.ts
       let eventEnd = event.ts + event.dur
       
+      # Skip events that don't overlap with range
+      if rangeSelectionActive and (eventEnd <= rangeStart or eventStart >= rangeEnd):
+        continue
+      
+      # Clip the event to the range
+      let clippedEvent = clipEventToRange(eventStart, eventEnd)
+      if clippedEvent.duration == 0:
+        continue
+      
       # Collect all child event time ranges (events that start within this event's duration)
+      # Clip children to both the parent bounds AND the range
       var childRanges: seq[tuple[start: float, finish: float]]
       
       for j in (i+1)..<trace.traceEvents.len:
@@ -801,11 +851,13 @@ proc computeTraceStats(): seq[EventStats] =
         if child.ts >= eventEnd:
           break
         
-        # If child starts within parent, add its range (clipped to parent bounds)
+        # If child starts within parent, add its range (clipped to parent bounds and range)
         if child.ts >= eventStart:
-          let childStart = child.ts
-          let childEnd = min(child.ts + child.dur, eventEnd)
-          childRanges.add((start: childStart, finish: childEnd))
+          let childStart = max(child.ts, clippedEvent.start)
+          let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
+          
+          if childEnd > childStart:
+            childRanges.add((start: childStart, finish: childEnd))
       
       # Merge overlapping child ranges to avoid double counting
       var coveredTime = 0.0
@@ -829,7 +881,7 @@ proc computeTraceStats(): seq[EventStats] =
         # Add the last merged range
         coveredTime += (mergedEnd - mergedStart)
       
-      let selfTime = event.dur - coveredTime
+      let selfTime = clippedEvent.duration - coveredTime
       statsMap[event.name].selfTime += selfTime
   
   # Convert to sorted sequence (by total time, descending)
@@ -844,11 +896,24 @@ var lastSelectedEventIndex = -1
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
-    # Recompute stats if selection changed or not computed yet
-    if not traceStatsComputed or lastSelectedEventIndex != selectedEventIndex:
+    # Check if range has changed
+    let currentRange = (
+      active: rangeSelectionActive, 
+      start: min(rangeSelectionStart, rangeSelectionEnd),
+      finish: max(rangeSelectionStart, rangeSelectionEnd)
+    )
+    let rangeChanged = (
+      currentRange.active != lastRangeForStats.active or
+      currentRange.start != lastRangeForStats.start or
+      currentRange.finish != lastRangeForStats.finish
+    )
+    
+    # Recompute stats if selection changed, range changed, or not computed yet
+    if not traceStatsComputed or lastSelectedEventIndex != selectedEventIndex or rangeChanged:
       cachedTraceStats = computeTraceStats()
       traceStatsComputed = true
       lastSelectedEventIndex = selectedEventIndex
+      lastRangeForStats = currentRange
     
     # Draw table header
     sk.at = contentPos + vec2(10, 10)
