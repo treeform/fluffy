@@ -110,6 +110,12 @@ var
   # Event selection
   selectedEventIndex: int = -1  # -1 means no selection
   
+  # Range selection
+  rangeSelectionActive: bool = false
+  rangeSelectionStart: float = 0.0  # timestamp
+  rangeSelectionEnd: float = 0.0    # timestamp
+  rangeSelectionDragging: bool = false
+  
   # Zoom and pan state for timeline
   timelineZoom: float = 1.0
   timelinePanOffset: float = 0.0
@@ -591,9 +597,41 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     
     const Height = 28.float
     
+    # Handle range selection on ruler
+    let rulerRect = rect(contentPos.x, rulerY, contentSize.x, rulerHeight)
+    
+    if mousePos.overlaps(rulerRect) and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil:
+      # Start range selection
+      let mouseTime = firstTs + ((mousePos.x - contentPos.x - panPixels) / scale)
+      rangeSelectionStart = mouseTime
+      rangeSelectionEnd = mouseTime
+      rangeSelectionDragging = true
+      rangeSelectionActive = true
+    
+    if rangeSelectionDragging:
+      if window.buttonDown[MouseLeft]:
+        # Update range end position
+        let mouseTime = firstTs + ((mousePos.x - contentPos.x - panPixels) / scale)
+        rangeSelectionEnd = mouseTime
+      else:
+        # Finished dragging
+        rangeSelectionDragging = false
+    
+    # Draw range selection rectangle
+    if rangeSelectionActive:
+      let rangeStart = min(rangeSelectionStart, rangeSelectionEnd)
+      let rangeEnd = max(rangeSelectionStart, rangeSelectionEnd)
+      let rangeStartX = (rangeStart - firstTs) * scale + panPixels + contentPos.x
+      let rangeEndX = (rangeEnd - firstTs) * scale + panPixels + contentPos.x
+      let rangeWidth = rangeEndX - rangeStartX
+      
+      # Draw the range highlight behind everything (but after ruler)
+      sk.drawRect(vec2(rangeStartX, contentPos.y), vec2(rangeWidth, contentSize.y), rgbx(80, 80, 80, 128))
+    
     # Handle event selection on click
     var clickedEventIndex = -1
-    if isMouseOver and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil:
+    var clickedOnEvent = false
+    if isMouseOver and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil and not rangeSelectionDragging:
       # Check if we clicked on any event
       var stack2: seq[tuple[event: TraceEvent, index: int]]
       for i, event in trace.traceEvents:
@@ -608,6 +646,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         let eventRect = rect(at.x + x, at.y + level, w, Height)
         if mousePos.overlaps(eventRect):
           clickedEventIndex = i
+          clickedOnEvent = true
         
         stack2.add((event: event, index: i))
       
@@ -617,6 +656,10 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       else:
         # Clicked outside any event, deselect
         selectedEventIndex = -1
+        
+        # Also clear range selection if clicked outside ruler and events
+        if not mousePos.overlaps(rulerRect):
+          rangeSelectionActive = false
     
     var stack: seq[TraceEvent]
     for i, event in trace.traceEvents:
@@ -877,6 +920,10 @@ proc loadTraceFile(filePath: string) =
     
     # Reset selection
     selectedEventIndex = -1
+    
+    # Reset range selection
+    rangeSelectionActive = false
+    rangeSelectionDragging = false
     
     # Reset zoom and pan
     timelineZoom = 1.0
