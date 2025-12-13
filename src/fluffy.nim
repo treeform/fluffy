@@ -545,7 +545,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
 
         if w > 30:
-          discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255))
+          discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
       
       stack.add(event)
 
