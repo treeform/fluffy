@@ -84,6 +84,13 @@ var
   prevNumAlloc: int
 
   trace: Trace
+  
+  # Zoom and pan state for timeline
+  timelineZoom: float = 1.0
+  timelinePanOffset: float = 0.0
+  timelinePanning: bool = false
+  timelinePanStartPos: Vec2
+  timelinePanStartOffset: float
 
 # Forward declarations
 proc movePanels*(area: Area, panels: seq[Panel])
@@ -460,7 +467,39 @@ proc nameToColor(name: string): ColorRGBX =
 
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
-  
+    let mousePos = window.mousePos.vec2
+    let contentRect = rect(contentPos.x, contentPos.y, contentSize.x, contentSize.y)
+    let isMouseOver = mousePos.overlaps(contentRect)
+    
+    # Handle mouse wheel zooming (relative to mouse position)
+    if isMouseOver and window.scrollDelta.y != 0 and not timelinePanning:
+      let zoomFactor = if window.scrollDelta.y > 0: 1.1 else: 0.9
+      let oldZoom = timelineZoom
+      timelineZoom *= zoomFactor
+      timelineZoom = max(0.001, min(timelineZoom, 10000.0))  # Clamp zoom
+      
+      # Calculate mouse position relative to content area (normalized 0-1)
+      let mouseRelX = (mousePos.x - contentPos.x) / contentSize.x
+      
+      # Adjust pan offset so the point under the mouse stays fixed
+      # The formula: keep the same world position under the mouse
+      let worldPosBeforeZoom = (mouseRelX - timelinePanOffset) / oldZoom
+      let worldPosAfterZoom = (mouseRelX - timelinePanOffset) / timelineZoom
+      timelinePanOffset += (worldPosAfterZoom - worldPosBeforeZoom) * timelineZoom
+    
+    # Handle panning with middle mouse button
+    if isMouseOver and window.buttonPressed[MouseMiddle] and dragPanel == nil:
+      timelinePanning = true
+      timelinePanStartPos = mousePos
+      timelinePanStartOffset = timelinePanOffset
+    
+    if timelinePanning:
+      if window.buttonDown[MouseMiddle]:
+        let delta = mousePos.x - timelinePanStartPos.x
+        timelinePanOffset = timelinePanStartOffset + (delta / contentSize.x)
+      else:
+        timelinePanning = false
+    
     let at = contentPos + vec2(0, 20)
     var firstTs = trace.traceEvents[0].ts
     var lastTs = trace.traceEvents[trace.traceEvents.len - 1].ts + trace.traceEvents[trace.traceEvents.len - 1].dur
@@ -468,17 +507,25 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       firstTs = min(firstTs, event.ts)
       lastTs = max(lastTs, event.ts + event.dur)
     let duration = lastTs - firstTs
-    let scale = contentSize.x / duration
+    
+    # Apply zoom and pan to the scale calculation
+    let baseScale = contentSize.x / duration
+    let scale = baseScale * timelineZoom
+    let panPixels = timelinePanOffset * contentSize.x
+    
     var stack: seq[TraceEvent]
     const Height = 16.float
     for event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
-      let x = (event.ts - firstTs) * scale
+      let x = (event.ts - firstTs) * scale + panPixels
       let w = max(1, event.dur * scale)
       let level = stack.len.float * Height;
-      sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
-      #   text(&"{event.name} {event.ts} {event.dur}") 
+      
+      # Only draw if visible in the viewport
+      if x + w >= 0 and x <= contentSize.x:
+        sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
+      
       stack.add(event)
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
