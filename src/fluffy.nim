@@ -63,11 +63,34 @@ type
     displayTimeUnit: string = "ns"
     traceEvents: seq[TraceEvent]
 
+
+
 # Constants
 const
   AreaHeaderHeight = 32.0
   AreaMargin = 6.0
   BackgroundColor = parseHtmlColor("#222222").rgbx
+  FlatUIColors = [
+    parseHtmlColor("#1abc9c").rgbx,
+    parseHtmlColor("#16a085").rgbx,
+    parseHtmlColor("#2ecc71").rgbx,
+    parseHtmlColor("#27ae60").rgbx,
+    parseHtmlColor("#3498db").rgbx,
+    parseHtmlColor("#2980b9").rgbx,
+    parseHtmlColor("#9b59b6").rgbx,
+    parseHtmlColor("#8e44ad").rgbx,
+    parseHtmlColor("#34495e").rgbx,
+    parseHtmlColor("#2c3e50").rgbx,
+    parseHtmlColor("#f1c40f").rgbx,
+    parseHtmlColor("#f39c12").rgbx,
+    parseHtmlColor("#e67e22").rgbx,
+    parseHtmlColor("#d35400").rgbx,
+    parseHtmlColor("#e74c3c").rgbx,
+    parseHtmlColor("#c0392b").rgbx,
+    parseHtmlColor("#ecf0f1").rgbx,
+    parseHtmlColor("#bdc3c7").rgbx,
+    parseHtmlColor("#95a5a6").rgbx,
+  ]
 
 # Globals
 var
@@ -457,13 +480,8 @@ proc drawPanels() =
     discard sk.drawText("Default", label, window.mousePos.vec2 + vec2(18, 14), rgbx(255, 255, 255, 255))
 
 proc nameToColor(name: string): ColorRGBX =
-  let hash = name.hash.int
-  return rgbx(
-    (128 + hash mod 128).uint8,
-    (128 + (hash div 128) mod 128).uint8,
-    (128 + (hash div 128 div 128) mod 128).uint8,
-    255
-  )
+  let hash = abs(name.hash.int)
+  FlatUIColors[hash mod FlatUIColors.len]
 
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
@@ -514,7 +532,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     let panPixels = timelinePanOffset * contentSize.x
     
     var stack: seq[TraceEvent]
-    const Height = 16.float
+    const Height = 28.float
     for event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
@@ -525,6 +543,9 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       # Only draw if visible in the viewport
       if x + w >= 0 and x <= contentSize.x:
         sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
+
+        if w > 30:
+          discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255))
       
       stack.add(event)
 
