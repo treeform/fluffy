@@ -20,7 +20,12 @@ makeContextCurrent(window)
 loadExtensions()
 
 proc snapToPixels(rect: Rect): Rect =
-  rect(rect.x.int.float32, rect.y.int.float32, rect.w.int.float32, rect.h.int.float32)
+  rect(
+    rect.x.round, 
+    rect.y.round, 
+    max(1, rect.w.round), 
+    max(1, rect.h.round)
+  )
 
 # Setup Silky
 let sk = newSilky("dist/atlas.png", "dist/atlas.json")
@@ -684,6 +689,8 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           rangeSelectionActive = false
     
     var stack: seq[TraceEvent]
+    var prevBounds = rect(0, 0, 0, 0)
+    var skips = 0
     for i, event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
@@ -699,12 +706,20 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         if i == selectedEventIndex:
           # Draw selection highlight
           color = rgbx(200, 200, 200, 255)
-        
-        sk.drawRect(at + vec2(x, level), vec2(w, Height), color)
 
-        if w > 30:
-          discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
-      
+        let bounds = rect(at.x + x, at.y + level, w, Height).snapToPixels()
+
+        if bounds.x == prevBounds.x and bounds.y == prevBounds.y and
+          bounds.w == prevBounds.w and bounds.h == prevBounds.h:
+          # As an optimization, skip drawing in the same place twice.
+          # This is really common when events gets very tiny.
+          inc skips
+        else:
+          prevBounds = bounds
+          sk.drawRect(bounds.xy, bounds.wh, color)
+          if w > 30:
+            discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
+        
       stack.add(event)
 
 type
