@@ -617,23 +617,50 @@ proc computeTraceStats(): seq[EventStats] =
     statsMap[event.name].totalTime += event.dur
     statsMap[event.name].count += 1
   
-  # Second pass: compute self time (time not spent in children)
+  # Second pass: compute self time using interval coverage algorithm
   for i, event in trace.traceEvents:
-    var childrenTime = 0.0
+    let eventStart = event.ts
     let eventEnd = event.ts + event.dur
     
-    # Find all direct children (events that start after this and end before this ends)
-    for j in (i+1)..<trace.traceEvents.len:
-      let potentialChild = trace.traceEvents[j]
-      if potentialChild.ts >= event.ts and potentialChild.ts + potentialChild.dur <= eventEnd:
-        # This is a child event
-        if potentialChild.ts >= event.ts and potentialChild.ts < eventEnd:
-          childrenTime += potentialChild.dur
-      elif potentialChild.ts >= eventEnd:
-        # We've passed the end of the current event
-        break
+    # Collect all child event time ranges (events that start within this event's duration)
+    var childRanges: seq[tuple[start: float, finish: float]]
     
-    let selfTime = event.dur - childrenTime
+    for j in (i+1)..<trace.traceEvents.len:
+      let child = trace.traceEvents[j]
+      
+      # If child starts after parent ends, we're done
+      if child.ts >= eventEnd:
+        break
+      
+      # If child starts within parent, add its range (clipped to parent bounds)
+      if child.ts >= eventStart:
+        let childStart = child.ts
+        let childEnd = min(child.ts + child.dur, eventEnd)
+        childRanges.add((start: childStart, finish: childEnd))
+    
+    # Merge overlapping child ranges to avoid double counting
+    var coveredTime = 0.0
+    if childRanges.len > 0:
+      # Sort by start time (should already be sorted, but let's be sure)
+      childRanges.sort(proc(a, b: auto): int = cmp(a.start, b.start))
+      
+      var mergedStart = childRanges[0].start
+      var mergedEnd = childRanges[0].finish
+      
+      for k in 1..<childRanges.len:
+        if childRanges[k].start <= mergedEnd:
+          # Overlapping or adjacent, extend the merged range
+          mergedEnd = max(mergedEnd, childRanges[k].finish)
+        else:
+          # Gap found, add the previous merged range to covered time
+          coveredTime += (mergedEnd - mergedStart)
+          mergedStart = childRanges[k].start
+          mergedEnd = childRanges[k].finish
+      
+      # Add the last merged range
+      coveredTime += (mergedEnd - mergedStart)
+    
+    let selfTime = event.dur - coveredTime
     statsMap[event.name].selfTime += selfTime
   
   # Convert to sorted sequence (by total time, descending)
