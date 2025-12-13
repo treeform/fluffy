@@ -469,12 +469,17 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       lastTs = max(lastTs, event.ts + event.dur)
     let duration = lastTs - firstTs
     let scale = contentSize.x / duration
-    var level = 0
-    var stack: seq[Event]
+    var stack: seq[TraceEvent]
+    const Height = 16.float
     for event in trace.traceEvents:
+      while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
+        discard stack.pop()
       let x = (event.ts - firstTs) * scale
-      sk.drawRect(at + vec2(x, 0), vec2(w, 10), nameToColor(event.name))
+      let w = max(1, event.dur * scale)
+      let level = stack.len.float * Height;
+      sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
       #   text(&"{event.name} {event.ts} {event.dur}") 
+      stack.add(event)
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
