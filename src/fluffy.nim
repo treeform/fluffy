@@ -117,6 +117,10 @@ var
   rangeSelectionDragging: bool = false
   lastRangeForStats: tuple[active: bool, start: float, finish: float] = (false, 0.0, 0.0)
   
+  # Table sorting
+  tableSortColumn: string = ""  # Empty string means no sorting
+  tableSortAscending: bool = true
+  
   # Zoom and pan state for timeline
   timelineZoom: float = 1.0
   timelinePanOffset: float = 0.0
@@ -552,6 +556,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       else:
         timelinePanning = false
     
+    # Compute the total duration of the trace.
     let at = contentPos + vec2(0, 20)
     var firstTs = trace.traceEvents[0].ts
     var lastTs = trace.traceEvents[trace.traceEvents.len - 1].ts + trace.traceEvents[trace.traceEvents.len - 1].dur
@@ -931,6 +936,34 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       lastSelectedEventIndex = selectedEventIndex
       lastRangeForStats = currentRange
     
+    # Apply sorting to the stats
+    if tableSortColumn != "":
+      cachedTraceStats.sort(proc(a, b: EventStats): int =
+        var cmpResult = 0
+        case tableSortColumn:
+        of "name":
+          cmpResult = cmp(a.name, b.name)
+        of "count":
+          cmpResult = cmp(a.count, b.count)
+        of "total":
+          cmpResult = cmp(a.totalTime, b.totalTime)
+        of "self":
+          cmpResult = cmp(a.selfTime, b.selfTime)
+        of "alloc":
+          cmpResult = cmp(a.totalAlloc, b.totalAlloc)
+        of "deloc":
+          cmpResult = cmp(a.totalDeloc, b.totalDeloc)
+        of "mem":
+          cmpResult = cmp(a.totalMem, b.totalMem)
+        else:
+          cmpResult = 0
+        
+        if tableSortAscending:
+          return cmpResult
+        else:
+          return -cmpResult
+      )
+    
     # Draw table header
     sk.at = contentPos + vec2(10, 10)
     let headerY = sk.at.y
@@ -942,14 +975,44 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     let delocColX = sk.at.x + 650
     let memColX = sk.at.x + 740
     
-    # Header
-    discard sk.drawText("Default", "Event Name", vec2(nameColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Count", vec2(countColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Total (ms)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Self (ms)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Allocs", vec2(allocColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Delocs", vec2(delocColX, headerY), rgbx(200, 200, 200, 255))
-    discard sk.drawText("Default", "Mem (B)", vec2(memColX, headerY), rgbx(200, 200, 200, 255))
+    # Helper to draw header with click detection
+    let mousePos = window.mousePos.vec2
+    let headerHeight = 20.0
+    
+    proc drawHeaderColumn(label: string, colX: float, colWidth: float, columnId: string) =
+      let headerRect = rect(colX, headerY, colWidth, headerHeight)
+      let isHovered = mousePos.overlaps(headerRect)
+      
+      # Detect clicks on header
+      if isHovered and window.buttonPressed[MouseLeft]:
+        if tableSortColumn == columnId:
+          # Already sorting by this column, toggle direction or clear
+          if tableSortAscending:
+            tableSortAscending = false
+          else:
+            # Clear sorting
+            tableSortColumn = ""
+        else:
+          # Start sorting by this column (ascending)
+          tableSortColumn = columnId
+          tableSortAscending = true
+      
+      # Draw header text
+      var displayLabel = label
+      if tableSortColumn == columnId:
+        displayLabel &= (if tableSortAscending: " ac" else: " dc")
+      
+      let textColor = if isHovered: rgbx(255, 255, 255, 255) else: rgbx(200, 200, 200, 255)
+      discard sk.drawText("Default", displayLabel, vec2(colX, headerY), textColor)
+    
+    # Draw headers
+    drawHeaderColumn("Event Name", nameColX, 240.0, "name")
+    drawHeaderColumn("Count", countColX, 60.0, "count")
+    drawHeaderColumn("Total (ms)", totalColX, 110.0, "total")
+    drawHeaderColumn("Self (ms)", selfColX, 110.0, "self")
+    drawHeaderColumn("Allocs", allocColX, 80.0, "alloc")
+    drawHeaderColumn("Delocs", delocColX, 80.0, "deloc")
+    drawHeaderColumn("Mem (B)", memColX, 100.0, "mem")
     
     # Draw separator line
     let lineY = headerY + 25
