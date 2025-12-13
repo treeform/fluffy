@@ -507,6 +507,16 @@ proc calculateNiceInterval(visibleDuration: float, targetTicks: int = 10): float
   
   return niceMult * magnitude
 
+proc formatTickTime(tickInterval: float, tickTime: float): string =
+  if tickInterval >= 100.0:
+    &"{(tickTime / 1000.0):.1f}ms"
+  elif tickInterval >= 10.0:
+    &"{(tickTime / 1000.0):.2f}ms"
+  elif tickInterval >= 1.0:
+    &"{(tickTime / 1000.0):.3f}ms"
+  else:
+    &"{(tickTime / 1000.0):.4f}ms"
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
     let mousePos = window.mousePos.vec2
@@ -581,15 +591,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         sk.drawRect(vec2(tickX, rulerY + rulerHeight - 8), vec2(1, 8), rgbx(150, 150, 150, 255))
         
         # Format and draw label
-        let label = 
-          if tickInterval >= 100.0:
-            &"{(tickTime / 1000.0):.1f}ms"
-          elif tickInterval >= 10.0:
-            &"{(tickTime / 1000.0):.2f}ms"
-          elif tickInterval >= 1.0:
-            &"{(tickTime / 1000.0):.3f}ms"
-          else:
-            &"{(tickTime / 1000.0):.4f}ms"
+        let label = formatTickTime(tickInterval, tickTime)
         
         let labelSize = sk.getTextSize("Default", label)
         discard sk.drawText("Default", label, vec2(tickX - labelSize.x / 2, rulerY + 2), rgbx(200, 200, 200, 255))
@@ -625,9 +627,23 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       let rangeStartX = (rangeStart - firstTs) * scale + panPixels + contentPos.x
       let rangeEndX = (rangeEnd - firstTs) * scale + panPixels + contentPos.x
       let rangeWidth = rangeEndX - rangeStartX
+      let rangeDuration = rangeEnd - rangeStart
       
       # Draw the range highlight behind everything (but after ruler)
       sk.drawRect(vec2(rangeStartX, contentPos.y), vec2(rangeWidth, contentSize.y), rgbx(80, 80, 80, 128))
+      
+      # Draw the range duration label
+      let durationLabel = formatTickTime(tickInterval, rangeDuration)
+      
+      let labelSize = sk.getTextSize("Default", durationLabel)
+      let labelX = rangeStartX + (rangeWidth - labelSize.x) / 2  # Center the label
+      let labelY = contentPos.y + rulerHeight - 5
+      
+      # Draw background for label
+      sk.draw9Patch("tooltip.9patch", 4, vec2(labelX - 4, labelY - 2), vec2(labelSize.x + 8, labelSize.y + 4), rgbx(0, 0, 0, 200))
+      
+      # Draw label text
+      discard sk.drawText("Default", durationLabel, vec2(labelX, labelY), rgbx(255, 255, 255, 255))
     
     # Handle event selection on click
     var clickedEventIndex = -1
