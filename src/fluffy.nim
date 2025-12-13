@@ -104,6 +104,9 @@ var
   trace: Trace
   traceFilePath: string = "traces/example_trace.json"
   
+  # Event selection
+  selectedEventIndex: int = -1  # -1 means no selection
+  
   # Zoom and pan state for timeline
   timelineZoom: float = 1.0
   timelinePanOffset: float = 0.0
@@ -571,19 +574,49 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         let label = 
           if tickInterval >= 100.0:
             &"{(tickTime / 1000.0):.1f}ms"
-          elif tickInterval >= 1000.0:
-            &"{(tickTime / 1000.0):.4f}ms"
+          elif tickInterval >= 10.0:
+            &"{(tickTime / 1000.0):.2f}ms"
+          elif tickInterval >= 1.0:
+            &"{(tickTime / 1000.0):.3f}ms"
           else:
-            &"{tickTime:.0f}ns"
+            &"{(tickTime / 1000.0):.4f}ms"
         
         let labelSize = sk.getTextSize("Default", label)
         discard sk.drawText("Default", label, vec2(tickX - labelSize.x / 2, rulerY + 2), rgbx(200, 200, 200, 255))
       
       tickTime += tickInterval
     
-    var stack: seq[TraceEvent]
     const Height = 28.float
-    for event in trace.traceEvents:
+    
+    # Handle event selection on click
+    var clickedEventIndex = -1
+    if isMouseOver and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil:
+      # Check if we clicked on any event
+      var stack2: seq[tuple[event: TraceEvent, index: int]]
+      for i, event in trace.traceEvents:
+        while stack2.len > 0 and stack2[^1].event.ts + stack2[^1].event.dur < event.ts:
+          discard stack2.pop()
+        
+        let x = (event.ts - firstTs) * scale + panPixels
+        let w = max(1, event.dur * scale)
+        let level = stack2.len.float * Height + rulerHeight
+        
+        # Use 'at' offset to match drawing coordinates
+        let eventRect = rect(at.x + x, at.y + level, w, Height)
+        if mousePos.overlaps(eventRect):
+          clickedEventIndex = i
+        
+        stack2.add((event: event, index: i))
+      
+      # Update selection
+      if clickedEventIndex >= 0:
+        selectedEventIndex = clickedEventIndex
+      else:
+        # Clicked outside any event, deselect
+        selectedEventIndex = -1
+    
+    var stack: seq[TraceEvent]
+    for i, event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
       let x = (event.ts - firstTs) * scale + panPixels
@@ -592,7 +625,14 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       
       # Only draw if visible in the viewport
       if x + w >= 0 and x <= contentSize.x:
-        sk.drawRect(at + vec2(x, level), vec2(w, Height), nameToColor(event.name))
+        var color = nameToColor(event.name)
+        
+        # Highlight selected event
+        if i == selectedEventIndex:
+          # Draw selection highlight
+          color = rgbx(200, 200, 200, 255)
+        
+        sk.drawRect(at + vec2(x, level), vec2(w, Height), color)
 
         if w > 30:
           discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
@@ -608,21 +648,36 @@ type
 
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events
+  ## If selectedEventIndex is set, compute stats only for that specific event instance
   var statsMap: Table[string, EventStats]
   
-  # First pass: compute total time for each event name
-  for event in trace.traceEvents:
-    if not statsMap.hasKey(event.name):
-      statsMap[event.name] = EventStats(name: event.name, totalTime: 0.0, selfTime: 0.0, count: 0)
-    statsMap[event.name].totalTime += event.dur
-    statsMap[event.name].count += 1
+  # Check if we're filtering to a single event
+  let isSingleEvent = selectedEventIndex >= 0
+  
+  # First pass: compute total time for each event name (or single event)
+  if isSingleEvent:
+    # Just the selected event
+    let event = trace.traceEvents[selectedEventIndex]
+    statsMap[event.name] = EventStats(name: event.name, totalTime: event.dur, selfTime: 0.0, count: 1)
+  else:
+    # All events
+    for event in trace.traceEvents:
+      if not statsMap.hasKey(event.name):
+        statsMap[event.name] = EventStats(name: event.name, totalTime: 0.0, selfTime: 0.0, count: 0)
+      statsMap[event.name].totalTime += event.dur
+      statsMap[event.name].count += 1
   
   # Second pass: compute self time using interval coverage algorithm
-  for i, event in trace.traceEvents:
+  if isSingleEvent:
+    # Compute self time for just the selected event
+    let i = selectedEventIndex
+    let event = trace.traceEvents[i]
+    
     let eventStart = event.ts
     let eventEnd = event.ts + event.dur
     
     # Collect all child event time ranges (events that start within this event's duration)
+    # NOTE: We use ALL events here, not just filtered ones, for correct self-time calculation
     var childRanges: seq[tuple[start: float, finish: float]]
     
     for j in (i+1)..<trace.traceEvents.len:
@@ -661,7 +716,53 @@ proc computeTraceStats(): seq[EventStats] =
       coveredTime += (mergedEnd - mergedStart)
     
     let selfTime = event.dur - coveredTime
-    statsMap[event.name].selfTime += selfTime
+    statsMap[event.name].selfTime = selfTime
+  else:
+    # Compute self time for all events
+    for i, event in trace.traceEvents:
+      let eventStart = event.ts
+      let eventEnd = event.ts + event.dur
+      
+      # Collect all child event time ranges (events that start within this event's duration)
+      var childRanges: seq[tuple[start: float, finish: float]]
+      
+      for j in (i+1)..<trace.traceEvents.len:
+        let child = trace.traceEvents[j]
+        
+        # If child starts after parent ends, we're done
+        if child.ts >= eventEnd:
+          break
+        
+        # If child starts within parent, add its range (clipped to parent bounds)
+        if child.ts >= eventStart:
+          let childStart = child.ts
+          let childEnd = min(child.ts + child.dur, eventEnd)
+          childRanges.add((start: childStart, finish: childEnd))
+      
+      # Merge overlapping child ranges to avoid double counting
+      var coveredTime = 0.0
+      if childRanges.len > 0:
+        # Sort by start time (should already be sorted, but let's be sure)
+        childRanges.sort(proc(a, b: auto): int = cmp(a.start, b.start))
+        
+        var mergedStart = childRanges[0].start
+        var mergedEnd = childRanges[0].finish
+        
+        for k in 1..<childRanges.len:
+          if childRanges[k].start <= mergedEnd:
+            # Overlapping or adjacent, extend the merged range
+            mergedEnd = max(mergedEnd, childRanges[k].finish)
+          else:
+            # Gap found, add the previous merged range to covered time
+            coveredTime += (mergedEnd - mergedStart)
+            mergedStart = childRanges[k].start
+            mergedEnd = childRanges[k].finish
+        
+        # Add the last merged range
+        coveredTime += (mergedEnd - mergedStart)
+      
+      let selfTime = event.dur - coveredTime
+      statsMap[event.name].selfTime += selfTime
   
   # Convert to sorted sequence (by total time, descending)
   result = @[]
@@ -671,13 +772,15 @@ proc computeTraceStats(): seq[EventStats] =
 
 var cachedTraceStats: seq[EventStats]
 var traceStatsComputed = false
+var lastSelectedEventIndex = -1
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
-    # Pre-compute stats once
-    if not traceStatsComputed:
+    # Recompute stats if selection changed or not computed yet
+    if not traceStatsComputed or lastSelectedEventIndex != selectedEventIndex:
       cachedTraceStats = computeTraceStats()
       traceStatsComputed = true
+      lastSelectedEventIndex = selectedEventIndex
     
     # Draw table header
     sk.at = contentPos + vec2(10, 10)
@@ -711,8 +814,8 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       # Draw stats
       discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 240)
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", &"{stats.totalTime / 1000:.2f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", &"{stats.selfTime / 1000:.2f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.totalTime / 1000:.4f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.selfTime / 1000:.4f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
       
       rowY += 25
 
@@ -737,6 +840,9 @@ proc loadTraceFile(filePath: string) =
     # Reset trace stats cache
     traceStatsComputed = false
     cachedTraceStats.setLen(0)
+    
+    # Reset selection
+    selectedEventIndex = -1
     
     # Reset zoom and pan
     timelineZoom = 1.0
