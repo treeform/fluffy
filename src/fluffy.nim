@@ -1,6 +1,6 @@
 
 import
-  std/[random, strformat, hashes, algorithm],
+  std/[random, strformat, hashes, algorithm, tables],
   opengl, windy, bumpy, vmath, chroma, silky, jsony
 
 # Setup Atlas
@@ -549,10 +549,95 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       
       stack.add(event)
 
+type
+  EventStats = object
+    name: string
+    totalTime: float
+    selfTime: float
+    count: int
+
+proc computeTraceStats(): seq[EventStats] =
+  ## Pre-compute trace statistics for all events
+  var statsMap: Table[string, EventStats]
+  
+  # First pass: compute total time for each event name
+  for event in trace.traceEvents:
+    if not statsMap.hasKey(event.name):
+      statsMap[event.name] = EventStats(name: event.name, totalTime: 0.0, selfTime: 0.0, count: 0)
+    statsMap[event.name].totalTime += event.dur
+    statsMap[event.name].count += 1
+  
+  # Second pass: compute self time (time not spent in children)
+  for i, event in trace.traceEvents:
+    var childrenTime = 0.0
+    let eventEnd = event.ts + event.dur
+    
+    # Find all direct children (events that start after this and end before this ends)
+    for j in (i+1)..<trace.traceEvents.len:
+      let potentialChild = trace.traceEvents[j]
+      if potentialChild.ts >= event.ts and potentialChild.ts + potentialChild.dur <= eventEnd:
+        # This is a child event
+        if potentialChild.ts >= event.ts and potentialChild.ts < eventEnd:
+          childrenTime += potentialChild.dur
+      elif potentialChild.ts >= eventEnd:
+        # We've passed the end of the current event
+        break
+    
+    let selfTime = event.dur - childrenTime
+    statsMap[event.name].selfTime += selfTime
+  
+  # Convert to sorted sequence (by total time, descending)
+  result = @[]
+  for stats in statsMap.values:
+    result.add(stats)
+  result.sort(proc(a, b: EventStats): int = cmp(b.totalTime, a.totalTime))
+
+var cachedTraceStats: seq[EventStats]
+var traceStatsComputed = false
+
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
-    h1text("Trace Table")
-    text("This is the trace table")
+    # Pre-compute stats once
+    if not traceStatsComputed:
+      cachedTraceStats = computeTraceStats()
+      traceStatsComputed = true
+    
+    # Draw table header
+    sk.at = contentPos + vec2(10, 10)
+    let headerY = sk.at.y
+    let nameColX = sk.at.x
+    let countColX = sk.at.x + 250
+    let totalColX = sk.at.x + 350
+    let selfColX = sk.at.x + 500
+    
+    # Header
+    discard sk.drawText("Default", "Event Name", vec2(nameColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Count", vec2(countColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Total Time (ns)", vec2(totalColX, headerY), rgbx(200, 200, 200, 255))
+    discard sk.drawText("Default", "Self Time (ns)", vec2(selfColX, headerY), rgbx(200, 200, 200, 255))
+    
+    # Draw separator line
+    let lineY = headerY + 25
+    sk.drawRect(vec2(nameColX, lineY), vec2(contentSize.x - 20, 1), rgbx(100, 100, 100, 255))
+    
+    # Draw rows
+    var rowY = lineY + 10
+    let maxRows = ((contentSize.y - (rowY - contentPos.y) - 10) / 25).int
+    
+    for i in 0..<min(cachedTraceStats.len, maxRows):
+      let stats = cachedTraceStats[i]
+      let color = nameToColor(stats.name)
+      
+      # Draw color indicator
+      sk.drawRect(vec2(nameColX - 5, rowY + 2), vec2(3, 16), color)
+      
+      # Draw stats
+      discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 240)
+      discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.totalTime:.2f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", &"{stats.selfTime:.2f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
+      
+      rowY += 25
 
 proc drawAllocNumbers(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
