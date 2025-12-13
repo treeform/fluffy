@@ -3,34 +3,24 @@ import
   std/[random, strformat, hashes, algorithm, tables, math, os],
   opengl, windy, bumpy, vmath, chroma, silky, jsony
 
-# Setup Atlas
 let builder = newAtlasBuilder(1024, 4)
 builder.addDir("data/", "data/")
 builder.addFont("data/IBMPlexSans-Regular.ttf", "H1", 32.0)
 builder.addFont("data/IBMPlexSans-Regular.ttf", "Default", 18.0)
 builder.write("dist/atlas.png", "dist/atlas.json")
-
-# Setup Window
 let window = newWindow(
   "Panels Example",
   ivec2(1200, 800),
   vsync = false
 )
+
 makeContextCurrent(window)
 loadExtensions()
 
-proc snapToPixels(rect: Rect): Rect =
-  rect(
-    rect.x.round, 
-    rect.y.round, 
-    max(1, rect.w.round), 
-    max(1, rect.h.round)
-  )
 
-# Setup Silky
+
 let sk = newSilky("dist/atlas.png", "dist/atlas.json")
 
-# Types
 type
   AreaLayout = enum
     Horizontal
@@ -71,7 +61,6 @@ type
     displayTimeUnit: string = "ns"
     traceEvents: seq[TraceEvent]
 
-# Constants
 const
   AreaHeaderHeight = 32.0
   AreaMargin = 6.0
@@ -94,12 +83,11 @@ const
     parseHtmlColor("#e74c3c").rgbx,
     parseHtmlColor("#c0392b").rgbx,
   ]
-
-# Globals
+  
 var
   rootArea: Area
-  dragArea: Area # For resizing splits
-  dragPanel: Panel # For moving panels
+  dragArea: Area # For resizing splits.
+  dragPanel: Panel # For moving panels.
   dropHighlight: Rect
   showDropHighlight: bool
 
@@ -111,29 +99,30 @@ var
 
   trace: Trace
   traceFilePath: string = "traces/example_trace.json"
-  
-  # Event selection
-  selectedEventIndex: int = -1  # -1 means no selection
-  
-  # Range selection
+
+  selectedEventIndex: int = -1
   rangeSelectionActive: bool = false
-  rangeSelectionStart: float = 0.0  # timestamp
-  rangeSelectionEnd: float = 0.0    # timestamp
+  rangeSelectionStart: float = 0.0
+  rangeSelectionEnd: float = 0.0
   rangeSelectionDragging: bool = false
   lastRangeForStats: tuple[active: bool, start: float, finish: float] = (false, 0.0, 0.0)
-  
-  # Table sorting
-  tableSortColumn: string = ""  # Empty string means no sorting
+
+  tableSortColumn: string = ""
   tableSortAscending: bool = true
-  
-  # Zoom and pan state for timeline
   timelineZoom: float = 1.0
   timelinePanOffset: float = 0.0
   timelinePanning: bool = false
   timelinePanStartPos: Vec2
   timelinePanStartOffset: float
 
-# Forward declarations
+proc snapToPixels(rect: Rect): Rect =
+  rect(
+    rect.x.round,
+    rect.y.round,
+    max(1, rect.w.round),
+    max(1, rect.h.round)
+  )
+
 proc movePanels*(area: Area, panels: seq[Panel])
 
 # Logic
