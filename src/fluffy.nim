@@ -625,7 +625,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       let rangeDuration = rangeEnd - rangeStart
       
       # Draw the range highlight behind everything (but after ruler).
-      sk.drawRect(vec2(rangeStartX, contentPos.y), vec2(rangeWidth, contentSize.y), rgbx(80, 80, 80, 128))
+      sk.drawRect(vec2(rangeStartX, contentPos.y), vec2(rangeWidth, contentSize.y), rgbx(40, 40, 40, 40))
       
       # Draw the range duration label.
       let durationLabel = formatTickTime(tickInterval, rangeDuration)
