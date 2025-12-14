@@ -5,7 +5,7 @@ import
   jsony
 
 type
-  Event = ref object
+  ChromeTraceEvent = ref object
     ## Chrome Tracing Event.
     name: string
     ph: string      # Event type.
@@ -21,34 +21,36 @@ type
     deloc: int      # Optional for deallocation count
     mem: int        # Optional for memory usage
 
-  Trace = ref object
+  ChromeTrace = ref object
     ## This must be set to "ns" for Chrome tracing to show properly.
     displayTimeUnit: string = "ns"
-    traceEvents: seq[Event]
+    traceEvents: seq[ChromeTraceEvent]
 
-  MemCounters = object
+  MemCounters* = object
     allocCounter: int
     deallocCounter: int
 
-  EventStart = object
-    ## Event start time and memory usage.
-    ts: int
+  Event = object
+    nameId: int
+    ts: float
+    dur: float
     alloc: int
     deloc: int
     mem: int
 
+  Trace = ref object
+    names: Table[int, string]
+    events: seq[Event]
+
 var
-  measureStart: int
-  measureStack: seq[string]
-  measures: CountTable[string]
-  calls: CountTable[string]
+  nameIds: Table[string, int]
   tracingEnabled: bool
   traceStartTick: int
   tracePid: int
   traceTid: int
   traceCategory: string
   traceData: Trace
-  traceStarts: seq[EventStart]
+  traceStarts: seq[Event]
 
 proc getTicks*(): int =
   ## Gets accurate time.
@@ -87,19 +89,19 @@ proc startTrace*(pid = 1, tid = 1, category = "measure") =
   traceCategory = category
   traceStarts.setLen(0)
   if traceData.isNil:
-    traceData = Trace(traceEvents: @[])
+    traceData = Trace(events: @[])
   else:
-    traceData.traceEvents.setLen(0)
+    traceData.events.setLen(0)
 
   echo "Trace started"
-  echo " trace events: ", traceData.traceEvents.len
+  echo " trace events: ", traceData.events.len
 
 proc endTrace*() =
   ## Ends tracing capture without writing to disk. Use dumpTrace to export.
   tracingEnabled = false
 
   echo "Trace ended"
-  echo " trace events: ", traceData.traceEvents.len
+  echo " trace events: ", traceData.events.len
 
 proc setTraceEnabled*(on: bool) =
   ## Sets tracing enabled state without resetting buffers.
@@ -108,15 +110,16 @@ proc setTraceEnabled*(on: bool) =
 proc measurePush*(what: string) =
   ## Used by {.measure.} pragma to push a measure section.
   if tracingEnabled:
-    let now = getTicks()
-    if measureStack.len > 0:
-      let dt = now - measureStart
-      let key = measureStack[^1]
-      measures.inc(key, dt)
-    measureStart = now
-    measureStack.add(what)
-    calls.inc(what)
-    traceStarts.add(EventStart(
+    let now = getTicks().float
+    let nameId =
+      if what notin nameIds:
+        let id = nameIds.len
+        nameIds[what] = id
+        id
+      else:
+        nameIds[what]
+    traceStarts.add(Event(
+      nameId: nameId,
       ts: now, 
       alloc: getAllocations(), 
       deloc: getDeallocations(),
@@ -126,28 +129,16 @@ proc measurePush*(what: string) =
 proc measurePop*() =
   ## Used by {.measure.} pragma to pop a measure section.
   if tracingEnabled:
-    let now = getTicks()
-    let key = measureStack.pop()
-    let dt = now - measureStart
-    measures.inc(key, dt)
-    measureStart = now
-    if traceStarts.len > 0:
-      let start = traceStarts.pop()
-      if not traceData.isNil and tracingEnabled:
-        let ev = Event(
-          name: key,
-          ph: "X",
-          ts: (start.ts - traceStartTick).float / 1000.0, # microseconds
-          pid: tracePid,
-          tid: traceTid,
-          cat: traceCategory,
-          args: newJNull(),
-          dur: (now - start.ts).float / 1000.0,
-          alloc: getAllocations() - start.alloc,
-          deloc: getDeallocations() - start.deloc,
-          mem: getMemoryUsage() - start.mem
-        )
-        traceData.traceEvents.add(ev)
+    let now = getTicks().float 
+    let eventStart = traceStarts.pop()
+    traceData.events.add(Event(
+      nameId: eventStart.nameId,
+      ts: eventStart.ts,
+      dur: now - eventStart.ts,
+      alloc: getAllocations() - eventStart.alloc,
+      deloc: getDeallocations() - eventStart.deloc,
+      mem: getMemoryUsage() - eventStart.mem
+    ))
 
 macro measure*(fn: untyped) =
   ## Macro that adds performance measurement to a function.
@@ -160,70 +151,32 @@ macro measure*(fn: untyped) =
 
 proc dumpMeasures*(overTotalMs = 0.0, tracePath = "") =
   ## Dumps performance measurements if total time exceeds threshold.
-  measures.sort()
-  var
-    maxK = 0
-    maxV = 0
-    totalV = 0
-  for k, v in measures:
-    maxK = max(maxK, k.len)
-    maxV = max(maxV, v)
-    totalV += v
-
-  if totalV.float32/1000000 > overTotalMs:
-    let n = "name ".alignLeft(maxK, padding = '.')
-    echo &"{n}.. self time    self %  # calls  relative amount"
-    for k, v in measures:
-      let
-        n = k.alignLeft(maxK)
-        bar = "#".repeat((v/maxV*40).int)
-        numCalls = calls[k]
-      echo &"{n} {v/1000000:>9.3f}ms{v/totalV*100:>9.3f}%{numCalls:>9} {bar}"
-
-  calls.clear()
-  measures.clear()
   if tracePath.len > 0 and not traceData.isNil:
-    let jsonText = toJson(traceData[])
+    for (name, nameId) in nameIds.pairs:
+      traceData.names[nameId] = name
+    # let jsonText = toJson(traceData)
+    # writeFile(tracePath, jsonText)
+    # echo "Trace written to ", tracePath
+
+    # Generate a Chrome Trace JSON file.
+    var chromeTrace: ChromeTrace = ChromeTrace(
+      displayTimeUnit: "ns"
+    )
+    let firstTs = traceData.events[0].ts
+    for event in traceData.events:
+      chromeTrace.traceEvents.add(ChromeTraceEvent(
+        name: traceData.names[event.nameId],
+        ph: "X",
+        ts: (event.ts - firstTs) / 1000.0,
+        pid: tracePid,
+        tid: traceTid,
+        cat: traceCategory,
+        args: newJNull(),
+        dur: event.dur / 1000.0,
+        alloc: event.alloc,
+        deloc: event.deloc,
+        mem: event.mem
+      ))
+    let jsonText = toJson(chromeTrace)
     writeFile(tracePath, jsonText)
     echo "Trace written to ", tracePath
-
-when isMainModule:
-
-  proc run3() {.measure.} =
-    sleep(10)
-
-  proc run2() {.measure.} =
-    sleep(10)
-
-  proc run(a: int) {.measure.} =
-    run3()
-    for i in 0 ..< a:
-      run2()
-    return
-
-  startTrace()
-  for i in 0 ..< 2:
-    run(10)
-
-  endTrace()
-  dumpMeasures(0.0, "tmp/trace.json")
-
-  # Trace test: nested functions with high precision timings.
-  # best tested with -d:release
-  proc leaf() {.measure.} =
-    discard
-
-  proc inner() {.measure.} =
-    for i in 0 ..< 12:
-      leaf()
-
-  proc outer() {.measure.} =
-    for i in 0 ..< 8:
-      inner()
-
-  startTrace()
-  outer()
-  endTrace()
-  dumpMeasures(0.0, "tmp/trace_nested.json")
-
-  echo "done"
