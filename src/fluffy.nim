@@ -1084,13 +1084,14 @@ proc initRootArea() =
   rootArea.split = 0.70
 
   rootArea.areas[0].addPanel("Trace Timeline", drawTraceTimeline)
+  rootArea.areas[1].addPanel("Trace Table", drawTraceTable)
 
-  rootArea.areas[1].split(Vertical)
-  rootArea.areas[1].split = 0.5
+  # rootArea.areas[1].split(Vertical)
+  # rootArea.areas[1].split = 0.5
 
-  rootArea.areas[1].areas[0].addPanel("Trace Table", drawTraceTable)
-  rootArea.areas[1].areas[1].addPanel("Alloc Numbers", drawAllocNumbers)
-  rootArea.areas[1].areas[1].addPanel("Alloc Size", drawAllocSize)
+  # rootArea.areas[1].areas[0].addPanel("Trace Table", drawTraceTable)
+  # rootArea.areas[1].areas[1].addPanel("Alloc Numbers", drawAllocNumbers)
+  # rootArea.areas[1].areas[1].addPanel("Alloc Size", drawAllocSize)
 
 window.onFrame = proc() =
   # Check for reload keys (F5 or Ctrl+R).
