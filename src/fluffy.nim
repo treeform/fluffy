@@ -66,6 +66,7 @@ type
     totalAlloc: int
     totalDeloc: int
     totalMem: int
+    selfMem: int
 
   TreemapItem = object
     eventIndex: int
@@ -137,6 +138,7 @@ var
   treemapGroups: seq[TreemapGroup]
   treemapLastRange: tuple[active: bool, start: float, finish: float]
   treemapNeedsUpdate = true
+  eventSelfMems: seq[int]
 
 proc snapToPixels(rect: Rect): Rect =
   ## Snap a rectangle to pixel boundaries.
@@ -692,7 +694,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       # Check if we clicked on any event.
       var stack2: seq[tuple[event: TraceEvent, index: int]]
       for i, event in trace.traceEvents:
-        while stack2.len > 0 and stack2[^1].event.ts + stack2[^1].event.dur < event.ts:
+        while stack2.len > 0 and stack2[^1].event.ts + stack2[^1].event.dur <= event.ts:
           discard stack2.pop()
 
         let x = (event.ts - firstTs) * scale + panPixels
@@ -724,7 +726,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     var hoveredEventIndex = -1
     var hoveredEventRect: Rect
     for i, event in trace.traceEvents:
-      while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
+      while stack.len > 0 and stack[^1].ts + stack[^1].dur <= event.ts:
         discard stack.pop()
       let x = (event.ts - firstTs) * scale + panPixels
       let w = max(1, event.dur * scale)
@@ -778,6 +780,27 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       )
       discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
 
+proc computeEventSelfMems() =
+  ## Compute self memory for each event (total mem minus direct children's mem).
+  ## Parents record the sum of their children's memory, so self mem subtracts
+  ## each direct child's mem from the parent, analogous to self time.
+  eventSelfMems = newSeq[int](trace.traceEvents.len)
+  for i in 0..<trace.traceEvents.len:
+    eventSelfMems[i] = trace.traceEvents[i].mem
+
+  # Use a stack to track parent-child relationships.
+  var stack: seq[int] # Stack of event indices.
+  for i, event in trace.traceEvents:
+    while stack.len > 0 and
+        trace.traceEvents[stack[^1]].ts + trace.traceEvents[stack[^1]].dur <= event.ts:
+      discard stack.pop()
+
+    # If there's a parent on the stack, subtract this event's mem from it.
+    if stack.len > 0:
+      eventSelfMems[stack[^1]] -= event.mem
+
+    stack.add(i)
+
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events.
   var statsMap: Table[string, EventStats]
@@ -819,11 +842,12 @@ proc computeTraceStats(): seq[EventStats] =
         count: 1,
         totalAlloc: event.alloc,
         totalDeloc: event.deloc,
-        totalMem: event.mem
+        totalMem: event.mem,
+        selfMem: eventSelfMems[selectedEventIndex]
       )
   else:
     # All events.
-    for event in trace.traceEvents:
+    for i, event in trace.traceEvents:
       let eventEnd = event.ts + event.dur
 
       # Skip events that don't overlap with range.
@@ -841,13 +865,15 @@ proc computeTraceStats(): seq[EventStats] =
             count: 0,
             totalAlloc: 0,
             totalDeloc: 0,
-            totalMem: 0
+            totalMem: 0,
+            selfMem: 0
           )
         statsMap[event.name].totalTime += clipped.duration
         statsMap[event.name].count += 1
         statsMap[event.name].totalAlloc += event.alloc
         statsMap[event.name].totalDeloc += event.deloc
         statsMap[event.name].totalMem += event.mem
+        statsMap[event.name].selfMem += eventSelfMems[i]
 
   # Second pass: compute self time using interval coverage algorithm.
   if isSingleEvent:
@@ -1012,6 +1038,8 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
           cmpResult = cmp(a.totalDeloc, b.totalDeloc)
         of "mem":
           cmpResult = cmp(a.totalMem, b.totalMem)
+        of "selfMem":
+          cmpResult = cmp(a.selfMem, b.selfMem)
         else:
           cmpResult = 0
 
@@ -1025,12 +1053,13 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     sk.at = contentPos + vec2(10, 10)
     let headerY = sk.at.y
     let nameColX = sk.at.x
-    let countColX = sk.at.x + 250
-    let totalColX = sk.at.x + 320
-    let selfColX = sk.at.x + 440
-    let allocColX = sk.at.x + 560
-    let delocColX = sk.at.x + 650
-    let memColX = sk.at.x + 740
+    let countColX = sk.at.x + 200
+    let totalColX = sk.at.x + 260
+    let selfColX = sk.at.x + 370
+    let allocColX = sk.at.x + 480
+    let delocColX = sk.at.x + 550
+    let memColX = sk.at.x + 620
+    let selfMemColX = sk.at.x + 720
 
     # Helper to draw header with click detection.
     let mousePos = window.mousePos.vec2
@@ -1063,13 +1092,14 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       discard sk.drawText("Default", displayLabel, vec2(colX, headerY), textColor)
 
     # Draw headers.
-    drawHeaderColumn("Event Name", nameColX, 240.0, "name")
-    drawHeaderColumn("Count", countColX, 60.0, "count")
-    drawHeaderColumn("Total (ms)", totalColX, 110.0, "total")
-    drawHeaderColumn("Self (ms)", selfColX, 110.0, "self")
-    drawHeaderColumn("Allocs", allocColX, 80.0, "alloc")
-    drawHeaderColumn("Delocs", delocColX, 80.0, "deloc")
-    drawHeaderColumn("Mem (B)", memColX, 100.0, "mem")
+    drawHeaderColumn("Event Name", nameColX, 190.0, "name")
+    drawHeaderColumn("Count", countColX, 50.0, "count")
+    drawHeaderColumn("Total (ms)", totalColX, 100.0, "total")
+    drawHeaderColumn("Self (ms)", selfColX, 100.0, "self")
+    drawHeaderColumn("Allocs", allocColX, 60.0, "alloc")
+    drawHeaderColumn("Delocs", delocColX, 60.0, "deloc")
+    drawHeaderColumn("Mem", memColX, 90.0, "mem")
+    drawHeaderColumn("Self Mem", selfMemColX, 100.0, "selfMem")
 
     # Draw separator line.
     let lineY = headerY + 25
@@ -1087,13 +1117,14 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       sk.drawRect(vec2(nameColX - 5, rowY + 2), vec2(3, 16), color)
 
       # Draw stats.
-      discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 240)
+      discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 190)
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.totalTime / 1000:.4f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.selfTime / 1000:.4f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", $stats.totalAlloc, vec2(allocColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", $stats.totalDeloc, vec2(delocColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", $stats.totalMem, vec2(memColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", formatBytes(stats.totalMem), vec2(memColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", formatBytes(stats.selfMem), vec2(selfMemColX, rowY), rgbx(255, 255, 255, 255))
 
       rowY += 25
 
@@ -1178,7 +1209,8 @@ proc computeTreemap() =
   let rEnd = if rangeActive: max(rangeSelectionStart, rangeSelectionEnd) else: 0.0
   var groupMap: Table[string, int]
   for i, event in trace.traceEvents:
-    if event.mem <= 0: continue
+    let selfMem = eventSelfMems[i]
+    if selfMem <= 0: continue
     if rangeActive:
       let eventEnd = event.ts + event.dur
       if eventEnd <= rStart or event.ts >= rEnd: continue
@@ -1187,9 +1219,9 @@ proc computeTreemap() =
       treemapGroups.add(TreemapGroup(name: event.name))
     let gi = groupMap[event.name]
     treemapGroups[gi].items.add(TreemapItem(
-      eventIndex: i, name: event.name, value: event.mem.float
+      eventIndex: i, name: event.name, value: selfMem.float
     ))
-    treemapGroups[gi].totalValue += event.mem.float
+    treemapGroups[gi].totalValue += selfMem.float
   treemapGroups.sort(proc(a, b: TreemapGroup): int = cmp(b.totalValue, a.totalValue))
 
 proc drawMemoryTreemap(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
@@ -1293,8 +1325,9 @@ proc drawMemoryTreemap(panel: Panel, frameId: string, contentPos: Vec2, contentS
     # Draw tooltip for hovered item.
     if hoveredEvent >= 0 and hoveredEvent < trace.traceEvents.len:
       let event = trace.traceEvents[hoveredEvent]
-      let tip = event.name & ": " & formatBytes(event.mem) &
-        " (" & $event.alloc & " allocs)"
+      let selfMem = eventSelfMems[hoveredEvent]
+      let tip = event.name & ": " & formatBytes(selfMem) &
+        " self (" & formatBytes(event.mem) & " total, " & $event.alloc & " allocs)"
       let tipSize = sk.getTextSize("Default", tip)
       let tipPos = mousePos + vec2(12, 12)
       sk.draw9Patch(
@@ -1312,6 +1345,9 @@ proc loadTraceFile(filePath: string) =
     trace = readFile(filePath).fromJson(Trace)
     trace.traceEvents.sort(proc(a: TraceEvent, b: TraceEvent): int =
       return cmp(a.ts, b.ts))
+
+    # Compute self memory for each event.
+    computeEventSelfMems()
 
     # Reset trace stats cache.
     traceStatsComputed = false

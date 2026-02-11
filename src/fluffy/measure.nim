@@ -61,7 +61,7 @@ proc getTicks*(): int =
 
 when not defined(nimTypeNames):
   {.hint: "-d:nimTypeNames must be to track allocations and deallocations".}
-  
+
 proc getAllocations(): int =
   ## Gets the number of allocations.
   when defined(nimTypeNames):
@@ -120,8 +120,8 @@ proc measurePush*(what: string) =
         nameIds[what]
     traceStarts.add(Event(
       nameId: nameId,
-      ts: now, 
-      alloc: getAllocations(), 
+      ts: now,
+      alloc: getAllocations(),
       deloc: getDeallocations(),
       mem: getMemoryUsage()
     ))
@@ -129,7 +129,7 @@ proc measurePush*(what: string) =
 proc measurePop*() =
   ## Used by {.measure.} pragma to pop a measure section.
   if tracingEnabled:
-    let now = getTicks().float 
+    let now = getTicks().float
     let eventStart = traceStarts.pop()
     traceData.events.add(Event(
       nameId: eventStart.nameId,
@@ -149,14 +149,11 @@ macro measure*(fn: untyped) =
       measurePop()
   return fn
 
-proc dumpMeasures*(overTotalMs = 0.0, tracePath = "") =
+proc dumpMeasures*(tracePath = "") =
   ## Dumps performance measurements if total time exceeds threshold.
   if tracePath.len > 0 and not traceData.isNil:
     for (name, nameId) in nameIds.pairs:
       traceData.names[nameId] = name
-    # let jsonText = toJson(traceData)
-    # writeFile(tracePath, jsonText)
-    # echo "Trace written to ", tracePath
 
     # Generate a Chrome Trace JSON file.
     var chromeTrace: ChromeTrace = ChromeTrace(

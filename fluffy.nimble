@@ -1,4 +1,4 @@
-version       = "2.0.1"
+version       = "1.0.0"
 author        = "Andre von Houck"
 description   = "A Nim profile viewer for Chrome JSON trace files."
 license       = "MIT"
