@@ -1,7 +1,7 @@
 ## Profile Tracing
 
 import
-  std/[macros, json, monotimes, strformat, strutils, tables, os],
+  std/[json, macros, monotimes, os, strformat, strutils, tables],
   jsony
 
 type
