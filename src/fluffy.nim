@@ -6,7 +6,7 @@ import
 let builder = newAtlasBuilder(1024, 4)
 builder.addDir("data/", "data/")
 builder.addFont("data/IBMPlexSans-Regular.ttf", "H1", 32.0)
-builder.addFont("data/IBMPlexSans-Regular.ttf", "Default", 18.0)
+builder.addFont("data/IBMPlexSans-Regular.ttf", "Default", 18.0, subpixelSteps = 10)
 builder.write("dist/atlas.png", "dist/atlas.json")
 let window = newWindow(
   "Fluffy Nim Profiler",
@@ -81,7 +81,7 @@ const
     parseHtmlColor("#e74c3c").rgbx,
     parseHtmlColor("#c0392b").rgbx,
   ]
-  
+
 var
   rootArea: Area
   dragArea: Area # For resizing splits.
@@ -409,7 +409,7 @@ proc drawAreaRecursive(area: Area, r: Rect) =
     let frameId = "panel:" & $cast[uint](activePanel)
     let contentPos = vec2(contentRect.x, contentRect.y)
     let contentSize = vec2(contentRect.w, contentRect.h)
-    
+
     activePanel.draw(activePanel, frameId, contentPos, contentSize)
 
 proc drawPanels() =
@@ -491,14 +491,14 @@ proc calculateNiceInterval(visibleDuration: float, targetTicks: int = 10): float
   let roughInterval = visibleDuration / targetTicks.float
   let magnitude = pow(10.0, floor(log10(roughInterval)))
   let normalized = roughInterval / magnitude
-  
+
   # Choose 1, 2, or 5 based on normalized value.
-  let niceMult = 
+  let niceMult =
     if normalized <= 1.5: 1.0
     elif normalized <= 3.0: 2.0
     elif normalized <= 7.0: 5.0
     else: 10.0
-  
+
   return niceMult * magnitude
 
 proc formatTickTime(tickInterval: float, tickTime: float): string =
@@ -516,36 +516,36 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     let mousePos = window.mousePos.vec2
     let contentRect = rect(contentPos.x, contentPos.y, contentSize.x, contentSize.y)
     let isMouseOver = mousePos.overlaps(contentRect)
-    
+
     # Handle mouse wheel zooming (relative to mouse position).
     if isMouseOver and window.scrollDelta.y != 0 and not timelinePanning:
       let zoomFactor = if window.scrollDelta.y > 0: 1.1 else: 0.9
       let oldZoom = timelineZoom
       timelineZoom *= zoomFactor
       timelineZoom = max(0.0001, min(timelineZoom, 100000.0))  # Clamp zoom.
-      
+
       # Calculate mouse position relative to content area (normalized 0-1).
       let mouseRelX = (mousePos.x - contentPos.x) / contentSize.x
-      
+
       # Adjust pan offset so the point under the mouse stays fixed.
       # The formula: keep the same world position under the mouse.
       let worldPosBeforeZoom = (mouseRelX - timelinePanOffset) / oldZoom
       let worldPosAfterZoom = (mouseRelX - timelinePanOffset) / timelineZoom
       timelinePanOffset += (worldPosAfterZoom - worldPosBeforeZoom) * timelineZoom
-    
+
     # Handle panning with middle mouse button.
     if isMouseOver and window.buttonPressed[MouseMiddle] and dragPanel == nil:
       timelinePanning = true
       timelinePanStartPos = mousePos
       timelinePanStartOffset = timelinePanOffset
-    
+
     if timelinePanning:
       if window.buttonDown[MouseMiddle]:
         let delta = mousePos.x - timelinePanStartPos.x
         timelinePanOffset = timelinePanStartOffset + (delta / contentSize.x)
       else:
         timelinePanning = false
-    
+
     # Compute the total duration of the trace.
     let at = contentPos + vec2(0, 20)
     var firstTs = trace.traceEvents[0].ts
@@ -554,50 +554,50 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       firstTs = min(firstTs, event.ts)
       lastTs = max(lastTs, event.ts + event.dur)
     let duration = lastTs - firstTs
-    
+
     # Apply zoom and pan to the scale calculation.
     let baseScale = contentSize.x / duration
     let scale = baseScale * timelineZoom
     let panPixels = timelinePanOffset * contentSize.x
-    
+
     # Calculate visible time range for ruler.
     let visibleStartTime = firstTs - (panPixels / scale)
     let visibleEndTime = visibleStartTime + (contentSize.x / scale)
     let visibleDuration = visibleEndTime - visibleStartTime
-    
+
     # Draw timeline ruler.
     let rulerHeight = 40.0
     let rulerY = contentPos.y
     sk.drawRect(vec2(contentPos.x, rulerY), vec2(contentSize.x, rulerHeight), rgbx(40, 40, 40, 255))
-    
+
     # Calculate nice tick interval.
     let tickInterval = calculateNiceInterval(visibleDuration)
-    
+
     # Find first tick that's visible.
     let firstTick = ceil(visibleStartTime / tickInterval) * tickInterval
-    
+
     # Draw ticks and labels.
     var tickTime = firstTick
     while tickTime <= visibleEndTime:
       let tickX = (tickTime - firstTs) * scale + panPixels + contentPos.x
-      
+
       if tickX >= contentPos.x and tickX <= contentPos.x + contentSize.x:
         # Draw tick mark.
         sk.drawRect(vec2(tickX, rulerY + rulerHeight - 8), vec2(1, 8), rgbx(150, 150, 150, 255))
-        
+
         # Format and draw label.
         let label = formatTickTime(tickInterval, tickTime)
-        
+
         let labelSize = sk.getTextSize("Default", label)
         discard sk.drawText("Default", label, vec2(tickX - labelSize.x / 2, rulerY + 2), rgbx(200, 200, 200, 255))
-      
+
       tickTime += tickInterval
-    
+
     const Height = 28.float
-    
+
     # Handle range selection on ruler.
     let rulerRect = rect(contentPos.x, rulerY, contentSize.x, rulerHeight)
-    
+
     if mousePos.overlaps(rulerRect) and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil:
       # Start range selection.
       let mouseTime = firstTs + ((mousePos.x - contentPos.x - panPixels) / scale)
@@ -605,7 +605,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       rangeSelectionEnd = mouseTime
       rangeSelectionDragging = true
       rangeSelectionActive = true
-    
+
     if rangeSelectionDragging:
       if window.buttonDown[MouseLeft]:
         # Update range end position.
@@ -614,7 +614,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       else:
         # Finished dragging.
         rangeSelectionDragging = false
-    
+
     # Draw range selection rectangle.
     if rangeSelectionActive:
       let rangeStart = min(rangeSelectionStart, rangeSelectionEnd)
@@ -623,23 +623,23 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       let rangeEndX = (rangeEnd - firstTs) * scale + panPixels + contentPos.x
       let rangeWidth = rangeEndX - rangeStartX
       let rangeDuration = rangeEnd - rangeStart
-      
+
       # Draw the range highlight behind everything (but after ruler).
       sk.drawRect(vec2(rangeStartX, contentPos.y), vec2(rangeWidth, contentSize.y), rgbx(40, 40, 40, 40))
-      
+
       # Draw the range duration label.
       let durationLabel = formatTickTime(tickInterval, rangeDuration)
-      
+
       let labelSize = sk.getTextSize("Default", durationLabel)
       let labelX = rangeStartX + (rangeWidth - labelSize.x) / 2  # Center the label.
       let labelY = contentPos.y + rulerHeight - 5
-      
+
       # Draw background for label.
       sk.draw9Patch("tooltip.9patch", 4, vec2(labelX - 4, labelY - 2), vec2(labelSize.x + 8, labelSize.y + 4), rgbx(0, 0, 0, 200))
-      
+
       # Draw label text.
       discard sk.drawText("Default", durationLabel, vec2(labelX, labelY), rgbx(255, 255, 255, 255))
-    
+
     # Handle event selection on click.
     var clickedEventIndex = -1
     var clickedOnEvent = false
@@ -649,30 +649,30 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       for i, event in trace.traceEvents:
         while stack2.len > 0 and stack2[^1].event.ts + stack2[^1].event.dur < event.ts:
           discard stack2.pop()
-        
+
         let x = (event.ts - firstTs) * scale + panPixels
         let w = max(1, event.dur * scale)
         let level = stack2.len.float * Height + rulerHeight
-        
+
         # Use 'at' offset to match drawing coordinates.
         let eventRect = rect(at.x + x, at.y + level, w, Height)
         if mousePos.overlaps(eventRect):
           clickedEventIndex = i
           clickedOnEvent = true
-        
+
         stack2.add((event: event, index: i))
-      
+
       # Update selection.
       if clickedEventIndex >= 0:
         selectedEventIndex = clickedEventIndex
       else:
         # Clicked outside any event, deselect.
         selectedEventIndex = -1
-        
+
         # Also clear range selection if clicked outside ruler and events.
         if not mousePos.overlaps(rulerRect):
           rangeSelectionActive = false
-    
+
     var stack: seq[TraceEvent]
     var prevBounds = rect(0, 0, 0, 0)
     var skips = 0
@@ -682,11 +682,11 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       let x = (event.ts - firstTs) * scale + panPixels
       let w = max(1, event.dur * scale)
       let level = stack.len.float * Height + rulerHeight;
-      
+
       # Only draw if visible in the viewport.
       if x + w >= 0 and x <= contentSize.x:
         var color = nameToColor(event.name)
-        
+
         # Highlight selected event.
         if i == selectedEventIndex:
           # Draw selection highlight.
@@ -704,7 +704,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           sk.drawRect(bounds.xy, bounds.wh, color)
           if w > 30:
             discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
-        
+
       stack.add(event)
 
 type
@@ -720,36 +720,36 @@ type
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events.
   var statsMap: Table[string, EventStats]
-  
+
   # Check if we're filtering to a single event.
   let isSingleEvent = selectedEventIndex >= 0
-  
+
   # Get the active range (if any).
   let rangeStart = if rangeSelectionActive: min(rangeSelectionStart, rangeSelectionEnd) else: 0.0
   let rangeEnd = if rangeSelectionActive: max(rangeSelectionStart, rangeSelectionEnd) else: 0.0
-  
+
   # Helper to clip event time to range.
   proc clipEventToRange(eventStart, eventEnd: float): tuple[start: float, finish: float, duration: float] =
     ## Clip event time range to the active selection range.
     if not rangeSelectionActive:
       return (eventStart, eventEnd, eventEnd - eventStart)
-    
+
     let clippedStart = max(eventStart, rangeStart)
     let clippedEnd = min(eventEnd, rangeEnd)
-    
+
     if clippedStart >= clippedEnd:
       # Event doesn't overlap with range.
       return (0.0, 0.0, 0.0)
-    
+
     return (clippedStart, clippedEnd, clippedEnd - clippedStart)
-  
+
   # First pass: compute total time for each event name (or single event).
   if isSingleEvent:
     # Just the selected event.
     let event = trace.traceEvents[selectedEventIndex]
     let eventEnd = event.ts + event.dur
     let clipped = clipEventToRange(event.ts, eventEnd)
-    
+
     if clipped.duration > 0:
       statsMap[event.name] = EventStats(
         name: event.name,
@@ -764,13 +764,13 @@ proc computeTraceStats(): seq[EventStats] =
     # All events.
     for event in trace.traceEvents:
       let eventEnd = event.ts + event.dur
-      
+
       # Skip events that don't overlap with range.
       if rangeSelectionActive and (eventEnd <= rangeStart or event.ts >= rangeEnd):
         continue
-      
+
       let clipped = clipEventToRange(event.ts, eventEnd)
-      
+
       if clipped.duration > 0:
         if not statsMap.hasKey(event.name):
           statsMap[event.name] = EventStats(
@@ -787,49 +787,49 @@ proc computeTraceStats(): seq[EventStats] =
         statsMap[event.name].totalAlloc += event.alloc
         statsMap[event.name].totalDeloc += event.deloc
         statsMap[event.name].totalMem += event.mem
-  
+
   # Second pass: compute self time using interval coverage algorithm.
   if isSingleEvent:
     # Compute self time for just the selected event.
     let i = selectedEventIndex
     let event = trace.traceEvents[i]
-    
+
     let eventStart = event.ts
     let eventEnd = event.ts + event.dur
-    
+
     # Clip the event to the range.
     let clippedEvent = clipEventToRange(eventStart, eventEnd)
     if clippedEvent.duration == 0:
       return result
-    
+
     # Collect all child event time ranges (events that start within this event's duration).
     # Clip children to both the parent bounds AND the range.
     var childRanges: seq[tuple[start: float, finish: float]]
-    
+
     for j in (i+1)..<trace.traceEvents.len:
       let child = trace.traceEvents[j]
-      
+
       # If child starts after parent ends, we're done.
       if child.ts >= eventEnd:
         break
-      
+
       # If child starts within parent, add its range (clipped to parent bounds and range).
       if child.ts >= eventStart:
         let childStart = max(child.ts, clippedEvent.start)
         let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
-        
+
         if childEnd > childStart:
           childRanges.add((start: childStart, finish: childEnd))
-    
+
     # Merge overlapping child ranges to avoid double counting.
     var coveredTime = 0.0
     if childRanges.len > 0:
       # Sort by start time (should already be sorted, but let's be sure).
       childRanges.sort(proc(a, b: auto): int = cmp(a.start, b.start))
-      
+
       var mergedStart = childRanges[0].start
       var mergedEnd = childRanges[0].finish
-      
+
       for k in 1..<childRanges.len:
         if childRanges[k].start <= mergedEnd:
           # Overlapping or adjacent, extend the merged range.
@@ -839,10 +839,10 @@ proc computeTraceStats(): seq[EventStats] =
           coveredTime += (mergedEnd - mergedStart)
           mergedStart = childRanges[k].start
           mergedEnd = childRanges[k].finish
-      
+
       # Add the last merged range.
       coveredTime += (mergedEnd - mergedStart)
-    
+
     let selfTime = clippedEvent.duration - coveredTime
     statsMap[event.name].selfTime = selfTime
   else:
@@ -850,44 +850,44 @@ proc computeTraceStats(): seq[EventStats] =
     for i, event in trace.traceEvents:
       let eventStart = event.ts
       let eventEnd = event.ts + event.dur
-      
+
       # Skip events that don't overlap with range.
       if rangeSelectionActive and (eventEnd <= rangeStart or eventStart >= rangeEnd):
         continue
-      
+
       # Clip the event to the range
       let clippedEvent = clipEventToRange(eventStart, eventEnd)
       if clippedEvent.duration == 0:
         continue
-      
+
       # Collect all child event time ranges: events that start within this event's duration.
       # Clip children to both the parent bounds AND the range.
       var childRanges: seq[tuple[start: float, finish: float]]
-      
+
       for j in (i+1)..<trace.traceEvents.len:
         let child = trace.traceEvents[j]
-        
+
         # If child starts after parent ends, we're done
         if child.ts >= eventEnd:
           break
-        
+
         # If child starts within parent, add its range (clipped to parent bounds and range)
         if child.ts >= eventStart:
           let childStart = max(child.ts, clippedEvent.start)
           let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
-          
+
           if childEnd > childStart:
             childRanges.add((start: childStart, finish: childEnd))
-      
+
       # Merge overlapping child ranges to avoid double counting.
       var coveredTime = 0.0
       if childRanges.len > 0:
         # Sort by start time (should already be sorted, but let's be sure).
         childRanges.sort(proc(a, b: auto): int = cmp(a.start, b.start))
-        
+
         var mergedStart = childRanges[0].start
         var mergedEnd = childRanges[0].finish
-        
+
         for k in 1..<childRanges.len:
           if childRanges[k].start <= mergedEnd:
             # Overlapping or adjacent, extend the merged range.
@@ -897,13 +897,13 @@ proc computeTraceStats(): seq[EventStats] =
             coveredTime += (mergedEnd - mergedStart)
             mergedStart = childRanges[k].start
             mergedEnd = childRanges[k].finish
-        
+
         # Add the last merged range.
         coveredTime += (mergedEnd - mergedStart)
-      
+
       let selfTime = clippedEvent.duration - coveredTime
       statsMap[event.name].selfTime += selfTime
-  
+
   # Convert to sorted sequence (by total time, descending).
   result = @[]
   for stats in statsMap.values:
@@ -918,7 +918,7 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
   frame(frameId, contentPos, contentSize):
     # Check if range has changed
     let currentRange = (
-      active: rangeSelectionActive, 
+      active: rangeSelectionActive,
       start: min(rangeSelectionStart, rangeSelectionEnd),
       finish: max(rangeSelectionStart, rangeSelectionEnd)
     )
@@ -927,14 +927,14 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       currentRange.start != lastRangeForStats.start or
       currentRange.finish != lastRangeForStats.finish
     )
-    
+
     # Recompute stats if selection changed, range changed, or not computed yet.
     if not traceStatsComputed or lastSelectedEventIndex != selectedEventIndex or rangeChanged:
       cachedTraceStats = computeTraceStats()
       traceStatsComputed = true
       lastSelectedEventIndex = selectedEventIndex
       lastRangeForStats = currentRange
-    
+
     # Apply sorting to the stats.
     if tableSortColumn != "":
       cachedTraceStats.sort(proc(a, b: EventStats): int =
@@ -956,13 +956,13 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
           cmpResult = cmp(a.totalMem, b.totalMem)
         else:
           cmpResult = 0
-        
+
         if tableSortAscending:
           return cmpResult
         else:
           return -cmpResult
       )
-    
+
     # Draw table header.
     sk.at = contentPos + vec2(10, 10)
     let headerY = sk.at.y
@@ -973,15 +973,15 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     let allocColX = sk.at.x + 560
     let delocColX = sk.at.x + 650
     let memColX = sk.at.x + 740
-    
+
     # Helper to draw header with click detection.
     let mousePos = window.mousePos.vec2
     let headerHeight = 20.0
-    
+
     proc drawHeaderColumn(label: string, colX: float, colWidth: float, columnId: string) =
       let headerRect = rect(colX, headerY, colWidth, headerHeight)
       let isHovered = mousePos.overlaps(headerRect)
-      
+
       # Detect clicks on header.
       if isHovered and window.buttonPressed[MouseLeft]:
         if tableSortColumn == columnId:
@@ -995,15 +995,15 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
           # Start sorting by this column (ascending).
           tableSortColumn = columnId
           tableSortAscending = true
-      
+
       # Draw header text.
       var displayLabel = label
       if tableSortColumn == columnId:
         displayLabel &= (if tableSortAscending: " ac" else: " dc")
-      
+
       let textColor = if isHovered: rgbx(255, 255, 255, 255) else: rgbx(200, 200, 200, 255)
       discard sk.drawText("Default", displayLabel, vec2(colX, headerY), textColor)
-    
+
     # Draw headers.
     drawHeaderColumn("Event Name", nameColX, 240.0, "name")
     drawHeaderColumn("Count", countColX, 60.0, "count")
@@ -1012,22 +1012,22 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     drawHeaderColumn("Allocs", allocColX, 80.0, "alloc")
     drawHeaderColumn("Delocs", delocColX, 80.0, "deloc")
     drawHeaderColumn("Mem (B)", memColX, 100.0, "mem")
-    
+
     # Draw separator line.
     let lineY = headerY + 25
     sk.drawRect(vec2(nameColX, lineY), vec2(contentSize.x - 20, 1), rgbx(100, 100, 100, 255))
-    
+
     # Draw rows.
     var rowY = lineY + 10
     let maxRows = ((contentSize.y - (rowY - contentPos.y) - 10) / 25).int
-    
+
     for i in 0..<min(cachedTraceStats.len, maxRows):
       let stats = cachedTraceStats[i]
       let color = nameToColor(stats.name)
-      
+
       # Draw color indicator.
       sk.drawRect(vec2(nameColX - 5, rowY + 2), vec2(3, 16), color)
-      
+
       # Draw stats.
       discard sk.drawText("Default", stats.name, vec2(nameColX, rowY), rgbx(255, 255, 255, 255), maxWidth = 240)
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
@@ -1036,7 +1036,7 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       discard sk.drawText("Default", $stats.totalAlloc, vec2(allocColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", $stats.totalDeloc, vec2(delocColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", $stats.totalMem, vec2(memColX, rowY), rgbx(255, 255, 255, 255))
-      
+
       rowY += 25
 
 proc drawAllocNumbers(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
@@ -1056,23 +1056,23 @@ proc loadTraceFile(filePath: string) =
     trace = readFile(filePath).fromJson(Trace)
     trace.traceEvents.sort(proc(a: TraceEvent, b: TraceEvent): int =
       return cmp(a.ts, b.ts))
-    
+
     # Reset trace stats cache.
     traceStatsComputed = false
     cachedTraceStats.setLen(0)
-    
+
     # Reset selection.
     selectedEventIndex = -1
-    
+
     # Reset range selection.
     rangeSelectionActive = false
     rangeSelectionDragging = false
-    
+
     # Reset zoom and pan.
     timelineZoom = 1.0
     timelinePanOffset = 0.0
     timelinePanning = false
-    
+
     echo "Trace loaded successfully: ", trace.traceEvents.len, " events"
   except Exception as e:
     echo "Error loading trace file: ", e.msg
@@ -1097,7 +1097,7 @@ window.onFrame = proc() =
   # Check for reload keys (F5 or Ctrl+R).
   if window.buttonPressed[KeyF5] or (window.buttonDown[KeyLeftControl] and window.buttonPressed[KeyR]):
     loadTraceFile(traceFilePath)
-  
+
   sk.beginUI(window, window.size)
 
   # Background.
