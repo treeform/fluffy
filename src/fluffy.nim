@@ -511,6 +511,17 @@ proc formatTickTime(tickInterval: float, tickTime: float): string =
   else:
     &"{(tickTime / 1000.0):.4f}ms"
 
+proc formatBytes(bytes: int): string =
+  ## Format bytes into human-readable string.
+  if bytes >= 1_073_741_824:
+    &"{bytes.float / 1_073_741_824.0:.1f} GB"
+  elif bytes >= 1_048_576:
+    &"{bytes.float / 1_048_576.0:.1f} MB"
+  elif bytes >= 1024:
+    &"{bytes.float / 1024.0:.1f} KB"
+  else:
+    &"{bytes} B"
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
     let mousePos = window.mousePos.vec2
@@ -676,6 +687,8 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     var stack: seq[TraceEvent]
     var prevBounds = rect(0, 0, 0, 0)
     var skips = 0
+    var hoveredEventIndex = -1
+    var hoveredEventRect: Rect
     for i, event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
@@ -705,7 +718,30 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           if w > 30:
             discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
 
+        # Track hover on visible events.
+        if isMouseOver and mousePos.overlaps(bounds):
+          hoveredEventIndex = i
+          hoveredEventRect = bounds
+
       stack.add(event)
+
+    # Draw hover highlight on top.
+    if hoveredEventIndex >= 0:
+      sk.drawRect(hoveredEventRect.xy, hoveredEventRect.wh, rgbx(128, 128, 128, 128))
+      let event = trace.traceEvents[hoveredEventIndex]
+      let dur = &"{event.dur / 1000:.4f}ms"
+      let tip = event.name & " " & dur &
+        (if event.alloc > 0: " " & $event.alloc & " allocs" else: "") &
+        (if event.mem != 0: " " & formatBytes(event.mem) else: "")
+      let tipSize = sk.getTextSize("Default", tip)
+      let tipPos = mousePos + vec2(12, 12)
+      sk.draw9Patch(
+        "tooltip.9patch", 4,
+        tipPos - vec2(4, 2),
+        vec2(tipSize.x + 8, tipSize.y + 4),
+        rgbx(0, 0, 0, 220)
+      )
+      discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
 
 type
   EventStats = object
@@ -716,6 +752,14 @@ type
     totalAlloc: int
     totalDeloc: int
     totalMem: int
+  TreemapItem = object
+    eventIndex: int
+    name: string
+    value: float
+  TreemapGroup = object
+    name: string
+    totalValue: float
+    items: seq[TreemapItem]
 
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events.
@@ -913,6 +957,9 @@ proc computeTraceStats(): seq[EventStats] =
 var cachedTraceStats: seq[EventStats]
 var traceStatsComputed = false
 var lastSelectedEventIndex = -1
+var treemapGroups: seq[TreemapGroup]
+var treemapLastRange: tuple[active: bool, start: float, finish: float]
+var treemapNeedsUpdate = true
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
@@ -1049,6 +1096,202 @@ proc drawAllocSize(panel: Panel, frameId: string, contentPos: Vec2, contentSize:
     h1text("Alloc Size")
     text("This is the alloc size")
 
+proc worstAspect(areas: seq[float], w: float): float =
+  ## Compute worst aspect ratio for a row in squarified treemap.
+  if areas.len == 0 or w <= 0: return 1e18
+  var s, rmax: float
+  var rmin = 1e18
+  for a in areas:
+    s += a
+    rmax = max(rmax, a)
+    rmin = min(rmin, a)
+  if s <= 0 or rmin <= 0: return 1e18
+  let s2 = s * s
+  let w2 = w * w
+  return max(w2 * rmax / s2, s2 / (w2 * rmin))
+
+proc layoutSquarified(values: seq[float], bounds: Rect): seq[Rect] =
+  ## Layout rectangles using squarified treemap algorithm.
+  result = newSeq[Rect](values.len)
+  if values.len == 0: return
+  var totalValue = 0.0
+  for v in values: totalValue += v
+  if totalValue <= 0 or bounds.w <= 0 or bounds.h <= 0: return
+  let totalArea = bounds.w * bounds.h
+  var areas = newSeq[float](values.len)
+  for i, v in values:
+    areas[i] = v / totalValue * totalArea
+  var remaining = bounds
+  var idx = 0
+  while idx < areas.len:
+    let w = min(remaining.w, remaining.h)
+    if w <= 0: break
+    var row = @[areas[idx]]
+    var rowCount = 1
+    while idx + rowCount < areas.len:
+      var newRow = row
+      newRow.add(areas[idx + rowCount])
+      if worstAspect(newRow, w) <= worstAspect(row, w):
+        row = newRow
+        inc rowCount
+      else:
+        break
+    var rowSum = 0.0
+    for a in row: rowSum += a
+    if remaining.w >= remaining.h:
+      let stripW = if remaining.h > 0: rowSum / remaining.h else: remaining.w
+      var y = remaining.y
+      for i in 0..<rowCount:
+        let h = if stripW > 0: row[i] / stripW else: 0.0
+        result[idx + i] = rect(remaining.x, y, stripW, h)
+        y += h
+      remaining = rect(remaining.x + stripW, remaining.y, remaining.w - stripW, remaining.h)
+    else:
+      let stripH = if remaining.w > 0: rowSum / remaining.w else: remaining.h
+      var x = remaining.x
+      for i in 0..<rowCount:
+        let itemW = if stripH > 0: row[i] / stripH else: 0.0
+        result[idx + i] = rect(x, remaining.y, itemW, stripH)
+        x += itemW
+      remaining = rect(remaining.x, remaining.y + stripH, remaining.w, remaining.h - stripH)
+    idx += rowCount
+
+proc computeTreemap() =
+  ## Compute treemap layout data from the current range selection.
+  treemapGroups.setLen(0)
+  if trace == nil or trace.traceEvents.len == 0: return
+  let rangeActive = rangeSelectionActive
+  let rStart = if rangeActive: min(rangeSelectionStart, rangeSelectionEnd) else: 0.0
+  let rEnd = if rangeActive: max(rangeSelectionStart, rangeSelectionEnd) else: 0.0
+  var groupMap: Table[string, int]
+  for i, event in trace.traceEvents:
+    if event.mem <= 0: continue
+    if rangeActive:
+      let eventEnd = event.ts + event.dur
+      if eventEnd <= rStart or event.ts >= rEnd: continue
+    if event.name notin groupMap:
+      groupMap[event.name] = treemapGroups.len
+      treemapGroups.add(TreemapGroup(name: event.name))
+    let gi = groupMap[event.name]
+    treemapGroups[gi].items.add(TreemapItem(
+      eventIndex: i, name: event.name, value: event.mem.float
+    ))
+    treemapGroups[gi].totalValue += event.mem.float
+  treemapGroups.sort(proc(a, b: TreemapGroup): int = cmp(b.totalValue, a.totalValue))
+
+proc drawMemoryTreemap(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
+  ## Draw a treemap visualization of memory allocations.
+  frame(frameId, contentPos, contentSize):
+    let mousePos = window.mousePos.vec2
+    let contentRect = rect(contentPos.x, contentPos.y, contentSize.x, contentSize.y)
+    let isMouseOver = mousePos.overlaps(contentRect)
+    # Recompute treemap data when range selection changes.
+    let currentRange = (
+      active: rangeSelectionActive,
+      start: min(rangeSelectionStart, rangeSelectionEnd),
+      finish: max(rangeSelectionStart, rangeSelectionEnd)
+    )
+    if treemapNeedsUpdate or currentRange != treemapLastRange:
+      computeTreemap()
+      treemapLastRange = currentRange
+      treemapNeedsUpdate = false
+    if treemapGroups.len == 0:
+      discard sk.drawText(
+        "Default",
+        "No memory allocations in selection.",
+        contentPos + vec2(10, 10),
+        rgbx(150, 150, 150, 255)
+      )
+      return
+    # Compute group-level layout.
+    let margin = 2.0
+    let bounds = rect(
+      contentPos.x + margin,
+      contentPos.y + margin,
+      contentSize.x - margin * 2,
+      contentSize.y - margin * 2
+    )
+    var groupValues = newSeq[float](treemapGroups.len)
+    for i in 0..<treemapGroups.len:
+      groupValues[i] = treemapGroups[i].totalValue
+    let groupRects = layoutSquarified(groupValues, bounds)
+    var hoveredEvent = -1
+    var hoveredRect: Rect
+    # Draw each group and its items.
+    for gi in 0..<treemapGroups.len:
+      let gRect = groupRects[gi]
+      if gRect.w < 1 or gRect.h < 1: continue
+      let color = nameToColor(treemapGroups[gi].name)
+      let borderColor = rgbx(
+        min(255, color.r.int + 20).uint8,
+        min(255, color.g.int + 20).uint8,
+        min(255, color.b.int + 20).uint8,
+        255
+      )
+      # Compute item-level layout within the group.
+      let innerRect = rect(
+        gRect.x + 1, gRect.y + 1,
+        max(1, gRect.w - 2), max(1, gRect.h - 2)
+      )
+      var itemValues = newSeq[float](treemapGroups[gi].items.len)
+      for i in 0..<treemapGroups[gi].items.len:
+        itemValues[i] = treemapGroups[gi].items[i].value
+      let itemRects = layoutSquarified(itemValues, innerRect)
+      # Draw item rectangles.
+      for i in 0..<treemapGroups[gi].items.len:
+        let r = itemRects[i].snapToPixels()
+        if r.w < 1 or r.h < 1: continue
+        # Highlight selected event in gray like the timeline.
+        let isSelected = treemapGroups[gi].items[i].eventIndex == selectedEventIndex
+        let drawColor = if isSelected: rgbx(200, 200, 200, 255) else: color
+        sk.drawRect(r.xy, r.wh, drawColor)
+        if r.w > 2 and r.h > 2:
+          sk.drawRect(r.xy, vec2(r.w, 1), borderColor)
+          sk.drawRect(r.xy, vec2(1, r.h), borderColor)
+        # Track hover.
+        if isMouseOver and mousePos.overlaps(r):
+          hoveredEvent = treemapGroups[gi].items[i].eventIndex
+          hoveredRect = r
+      # Draw group outline.
+      let gr = gRect.snapToPixels()
+      sk.drawRect(gr.xy, vec2(gr.w, 1), rgbx(0, 0, 0, 255))
+      sk.drawRect(gr.xy, vec2(1, gr.h), rgbx(0, 0, 0, 255))
+      sk.drawRect(vec2(gr.x + gr.w - 1, gr.y), vec2(1, gr.h), rgbx(0, 0, 0, 255))
+      sk.drawRect(vec2(gr.x, gr.y + gr.h - 1), vec2(gr.w, 1), rgbx(0, 0, 0, 255))
+      # Draw group label.
+      if gRect.w > 50 and gRect.h > 18:
+        let label = treemapGroups[gi].name & " " &
+          formatBytes(treemapGroups[gi].totalValue.int)
+        discard sk.drawText(
+          "Default",
+          label,
+          vec2(gRect.x + 4, gRect.y + 2),
+          rgbx(255, 255, 255, 255),
+          maxWidth = gRect.w - 8
+        )
+    # Draw hover highlight on top.
+    if hoveredEvent >= 0:
+      sk.drawRect(hoveredRect.xy, hoveredRect.wh, rgbx(128, 128, 128, 128))
+    # Handle click to select event on timeline.
+    if isMouseOver and window.buttonPressed[MouseLeft] and dragPanel == nil:
+      if hoveredEvent >= 0:
+        selectedEventIndex = hoveredEvent
+        traceStatsComputed = false
+    # Draw tooltip for hovered item.
+    if hoveredEvent >= 0 and hoveredEvent < trace.traceEvents.len:
+      let event = trace.traceEvents[hoveredEvent]
+      let tip = event.name & ": " & formatBytes(event.mem) &
+        " (" & $event.alloc & " allocs)"
+      let tipSize = sk.getTextSize("Default", tip)
+      let tipPos = mousePos + vec2(12, 12)
+      sk.draw9Patch(
+        "tooltip.9patch", 4,
+        tipPos - vec2(4, 2),
+        vec2(tipSize.x + 8, tipSize.y + 4),
+        rgbx(0, 0, 0, 220)
+      )
+      discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
+
 proc loadTraceFile(filePath: string) =
   ## Load a trace file and reset related state
   try:
@@ -1060,6 +1303,11 @@ proc loadTraceFile(filePath: string) =
     # Reset trace stats cache.
     traceStatsComputed = false
     cachedTraceStats.setLen(0)
+
+    # Reset treemap cache.
+    treemapGroups.setLen(0)
+    treemapLastRange = (active: false, start: 0.0, finish: 0.0)
+    treemapNeedsUpdate = true
 
     # Reset selection.
     selectedEventIndex = -1
@@ -1084,14 +1332,10 @@ proc initRootArea() =
   rootArea.split = 0.70
 
   rootArea.areas[0].addPanel("Trace Timeline", drawTraceTimeline)
-  rootArea.areas[1].addPanel("Trace Table", drawTraceTable)
-
-  # rootArea.areas[1].split(Vertical)
-  # rootArea.areas[1].split = 0.5
-
-  # rootArea.areas[1].areas[0].addPanel("Trace Table", drawTraceTable)
-  # rootArea.areas[1].areas[1].addPanel("Alloc Numbers", drawAllocNumbers)
-  # rootArea.areas[1].areas[1].addPanel("Alloc Size", drawAllocSize)
+  rootArea.areas[1].split(Vertical)
+  rootArea.areas[1].split = 0.5
+  rootArea.areas[1].areas[0].addPanel("Trace Table", drawTraceTable)
+  rootArea.areas[1].areas[1].addPanel("Memory", drawMemoryTreemap)
 
 window.onFrame = proc() =
   # Check for reload keys (F5 or Ctrl+R).
