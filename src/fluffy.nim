@@ -527,6 +527,12 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     let mousePos = window.mousePos.vec2
     let contentRect = rect(contentPos.x, contentPos.y, contentSize.x, contentSize.y)
     let isMouseOver = mousePos.overlaps(contentRect)
+    # Clip all drawing to the content area with a 2 pixel inset.
+    let clipRect = rect(
+      contentPos.x + 2, contentPos.y + 2,
+      contentSize.x - 4, contentSize.y - 4
+    )
+    sk.pushClipRect(clipRect)
 
     # Handle mouse wheel zooming (relative to mouse position).
     if isMouseOver and window.scrollDelta.y != 0 and not timelinePanning:
@@ -724,8 +730,9 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           hoveredEventRect = bounds
 
       stack.add(event)
+    sk.popClipRect()
 
-    # Draw hover highlight on top.
+    # Draw hover highlight and tooltip outside the clip rect.
     if hoveredEventIndex >= 0:
       sk.drawRect(hoveredEventRect.xy, hoveredEventRect.wh, rgbx(128, 128, 128, 128))
       let event = trace.traceEvents[hoveredEventIndex]
