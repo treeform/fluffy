@@ -542,14 +542,16 @@ proc formatTickTime(tickInterval: float, tickTime: float): string =
 
 proc formatBytes(bytes: int): string =
   ## Format bytes into human-readable string.
-  if bytes >= 1_073_741_824:
-    &"{bytes.float / 1_073_741_824.0:.1f} GB"
-  elif bytes >= 1_048_576:
-    &"{bytes.float / 1_048_576.0:.1f} MB"
-  elif bytes >= 1024:
-    &"{bytes.float / 1024.0:.1f} KB"
+  let prefix = if bytes < 0: "-" else: ""
+  let a = abs(bytes)
+  if a >= 1_073_741_824:
+    &"{prefix}{a.float / 1_073_741_824.0:.1f} GB"
+  elif a >= 1_048_576:
+    &"{prefix}{a.float / 1_048_576.0:.1f} MB"
+  elif a >= 1024:
+    &"{prefix}{a.float / 1024.0:.1f} KB"
   else:
-    &"{bytes} B"
+    &"{prefix}{a} B"
 
 proc formatCount(n: int): string =
   ## Format a count with K/M/B suffix, always showing 4 significant digits.
@@ -617,7 +619,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     # Compute the total duration of the trace.
     let at = contentPos + vec2(0, 20)
     var firstTs = trace.traceEvents[0].ts
-    var lastTs = trace.traceEvents[trace.traceEvents.len - 1].ts + trace.traceEvents[trace.traceEvents.len - 1].dur
+    var lastTs = trace.traceEvents[0].ts + trace.traceEvents[0].dur
     for event in trace.traceEvents:
       firstTs = min(firstTs, event.ts)
       lastTs = max(lastTs, event.ts + event.dur)
