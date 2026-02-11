@@ -1,6 +1,6 @@
 import
-  std/[random, strformat, hashes, algorithm, tables, math, os],
-  opengl, windy, bumpy, vmath, chroma, silky, jsony
+  std/[algorithm, hashes, math, os, random, strformat, tables],
+  bumpy, chroma, jsony, opengl, silky, vmath, windy
 
 let builder = newAtlasBuilder(1024, 4)
 builder.addDir("data/", "data/")
@@ -58,6 +58,25 @@ type
     displayTimeUnit: string = "ns"
     traceEvents: seq[TraceEvent]
 
+  EventStats = object
+    name: string
+    totalTime: float
+    selfTime: float
+    count: int
+    totalAlloc: int
+    totalDeloc: int
+    totalMem: int
+
+  TreemapItem = object
+    eventIndex: int
+    name: string
+    value: float
+
+  TreemapGroup = object
+    name: string
+    totalValue: float
+    items: seq[TreemapItem]
+
 const
   AreaHeaderHeight = 32.0
   AreaMargin = 6.0
@@ -111,6 +130,13 @@ var
   timelinePanning: bool = false
   timelinePanStartPos: Vec2
   timelinePanStartOffset: float
+
+  cachedTraceStats: seq[EventStats]
+  traceStatsComputed = false
+  lastSelectedEventIndex = -1
+  treemapGroups: seq[TreemapGroup]
+  treemapLastRange: tuple[active: bool, start: float, finish: float]
+  treemapNeedsUpdate = true
 
 proc snapToPixels(rect: Rect): Rect =
   ## Snap a rectangle to pixel boundaries.
@@ -752,24 +778,6 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
       )
       discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
 
-type
-  EventStats = object
-    name: string
-    totalTime: float
-    selfTime: float
-    count: int
-    totalAlloc: int
-    totalDeloc: int
-    totalMem: int
-  TreemapItem = object
-    eventIndex: int
-    name: string
-    value: float
-  TreemapGroup = object
-    name: string
-    totalValue: float
-    items: seq[TreemapItem]
-
 proc computeTraceStats(): seq[EventStats] =
   ## Pre-compute trace statistics for all events.
   var statsMap: Table[string, EventStats]
@@ -962,14 +970,6 @@ proc computeTraceStats(): seq[EventStats] =
   for stats in statsMap.values:
     result.add(stats)
   result.sort(proc(a, b: EventStats): int = cmp(b.totalTime, a.totalTime))
-
-var
-  cachedTraceStats: seq[EventStats]
-  traceStatsComputed = false
-  lastSelectedEventIndex = -1
-  treemapGroups: seq[TreemapGroup]
-  treemapLastRange: tuple[active: bool, start: float, finish: float]
-  treemapNeedsUpdate = true
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   ## Draw the trace statistics table panel with sortable columns.

@@ -1,5 +1,6 @@
-import std/[times, os], fluffy/measure
-
+import
+  std/[os, times],
+  fluffy/measure
 
 proc startFrame() {.measure.} =
   sleep(10)
