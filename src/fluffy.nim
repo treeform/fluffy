@@ -511,6 +511,17 @@ proc formatTickTime(tickInterval: float, tickTime: float): string =
   else:
     &"{(tickTime / 1000.0):.4f}ms"
 
+proc formatBytes(bytes: int): string =
+  ## Format bytes into human-readable string.
+  if bytes >= 1_073_741_824:
+    &"{bytes.float / 1_073_741_824.0:.1f} GB"
+  elif bytes >= 1_048_576:
+    &"{bytes.float / 1_048_576.0:.1f} MB"
+  elif bytes >= 1024:
+    &"{bytes.float / 1024.0:.1f} KB"
+  else:
+    &"{bytes} B"
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   frame(frameId, contentPos, contentSize):
     let mousePos = window.mousePos.vec2
@@ -676,6 +687,8 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     var stack: seq[TraceEvent]
     var prevBounds = rect(0, 0, 0, 0)
     var skips = 0
+    var hoveredEventIndex = -1
+    var hoveredEventRect: Rect
     for i, event in trace.traceEvents:
       while stack.len > 0 and stack[^1].ts + stack[^1].dur < event.ts:
         discard stack.pop()
@@ -705,7 +718,30 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           if w > 30:
             discard sk.drawText("Default", event.name, at + vec2(x, level), rgbx(255, 255, 255, 255), maxWidth = w)
 
+        # Track hover on visible events.
+        if isMouseOver and mousePos.overlaps(bounds):
+          hoveredEventIndex = i
+          hoveredEventRect = bounds
+
       stack.add(event)
+
+    # Draw hover highlight on top.
+    if hoveredEventIndex >= 0:
+      sk.drawRect(hoveredEventRect.xy, hoveredEventRect.wh, rgbx(128, 128, 128, 128))
+      let event = trace.traceEvents[hoveredEventIndex]
+      let dur = &"{event.dur / 1000:.4f}ms"
+      let tip = event.name & " " & dur &
+        (if event.alloc > 0: " " & $event.alloc & " allocs" else: "") &
+        (if event.mem != 0: " " & formatBytes(event.mem) else: "")
+      let tipSize = sk.getTextSize("Default", tip)
+      let tipPos = mousePos + vec2(12, 12)
+      sk.draw9Patch(
+        "tooltip.9patch", 4,
+        tipPos - vec2(4, 2),
+        vec2(tipSize.x + 8, tipSize.y + 4),
+        rgbx(0, 0, 0, 220)
+      )
+      discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
 
 type
   EventStats = object
@@ -1119,17 +1155,6 @@ proc layoutSquarified(values: seq[float], bounds: Rect): seq[Rect] =
         x += itemW
       remaining = rect(remaining.x, remaining.y + stripH, remaining.w, remaining.h - stripH)
     idx += rowCount
-
-proc formatBytes(bytes: int): string =
-  ## Format bytes into human-readable string.
-  if bytes >= 1_073_741_824:
-    &"{bytes.float / 1_073_741_824.0:.1f} GB"
-  elif bytes >= 1_048_576:
-    &"{bytes.float / 1_048_576.0:.1f} MB"
-  elif bytes >= 1024:
-    &"{bytes.float / 1024.0:.1f} KB"
-  else:
-    &"{bytes} B"
 
 proc computeTreemap() =
   ## Compute treemap layout data from the current range selection.
