@@ -551,6 +551,27 @@ proc formatBytes(bytes: int): string =
   else:
     &"{bytes} B"
 
+proc formatCount(n: int): string =
+  ## Format a count with K/M/B suffix, always showing 4 significant digits.
+  let a = abs(n).float
+  if a >= 1_000_000_000:
+    let v = n.float / 1_000_000_000.0
+    if a >= 100_000_000_000.0: &"{v:.1f}B"
+    elif a >= 10_000_000_000.0: &"{v:.2f}B"
+    else: &"{v:.3f}B"
+  elif a >= 1_000_000:
+    let v = n.float / 1_000_000.0
+    if a >= 100_000_000.0: &"{v:.1f}M"
+    elif a >= 10_000_000.0: &"{v:.2f}M"
+    else: &"{v:.3f}M"
+  elif a >= 1_000:
+    let v = n.float / 1_000.0
+    if a >= 100_000.0: &"{v:.1f}K"
+    elif a >= 10_000.0: &"{v:.2f}K"
+    else: &"{v:.3f}K"
+  else:
+    $n
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   ## Draw the trace timeline panel with ruler, events, and range selection.
   frame(frameId, contentPos, contentSize):
@@ -1057,9 +1078,9 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     let totalColX = sk.at.x + 260
     let selfColX = sk.at.x + 370
     let allocColX = sk.at.x + 480
-    let delocColX = sk.at.x + 550
-    let memColX = sk.at.x + 620
-    let selfMemColX = sk.at.x + 720
+    let delocColX = sk.at.x + 560
+    let memColX = sk.at.x + 640
+    let selfMemColX = sk.at.x + 770
 
     # Helper to draw header with click detection.
     let mousePos = window.mousePos.vec2
@@ -1096,10 +1117,10 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
     drawHeaderColumn("Count", countColX, 50.0, "count")
     drawHeaderColumn("Total (ms)", totalColX, 100.0, "total")
     drawHeaderColumn("Self (ms)", selfColX, 100.0, "self")
-    drawHeaderColumn("Allocs", allocColX, 60.0, "alloc")
-    drawHeaderColumn("Delocs", delocColX, 60.0, "deloc")
-    drawHeaderColumn("Mem", memColX, 90.0, "mem")
-    drawHeaderColumn("Self Mem", selfMemColX, 100.0, "selfMem")
+    drawHeaderColumn("Allocs", allocColX, 70.0, "alloc")
+    drawHeaderColumn("Delocs", delocColX, 70.0, "deloc")
+    drawHeaderColumn("Total (bytes)", memColX, 90.0, "mem")
+    drawHeaderColumn("Self (bytes)", selfMemColX, 100.0, "selfMem")
 
     # Draw separator line.
     let lineY = headerY + 25
@@ -1121,8 +1142,8 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       discard sk.drawText("Default", $stats.count, vec2(countColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.totalTime / 1000:.4f}", vec2(totalColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", &"{stats.selfTime / 1000:.4f}", vec2(selfColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", $stats.totalAlloc, vec2(allocColX, rowY), rgbx(255, 255, 255, 255))
-      discard sk.drawText("Default", $stats.totalDeloc, vec2(delocColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", formatCount(stats.totalAlloc), vec2(allocColX, rowY), rgbx(255, 255, 255, 255))
+      discard sk.drawText("Default", formatCount(stats.totalDeloc), vec2(delocColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", formatBytes(stats.totalMem), vec2(memColX, rowY), rgbx(255, 255, 255, 255))
       discard sk.drawText("Default", formatBytes(stats.selfMem), vec2(selfMemColX, rowY), rgbx(255, 255, 255, 255))
 
