@@ -1,4 +1,3 @@
-
 import
   std/[random, strformat, hashes, algorithm, tables, math, os],
   opengl, windy, bumpy, vmath, chroma, silky, jsony
@@ -434,27 +433,27 @@ proc drawPanels() =
       let (targetArea, areaScan, _) = rootArea.scan()
       if targetArea != nil:
         case areaScan:
-          of Header:
-            let (idx, _) = targetArea.getTabInsertInfo(window.mousePos.vec2)
-            targetArea.insertPanel(dragPanel, idx)
-          of Body:
-            targetArea.movePanel(dragPanel)
-          of North:
-            targetArea.split(Horizontal)
-            targetArea.areas[0].movePanel(dragPanel)
-            targetArea.areas[1].movePanels(targetArea.panels)
-          of South:
-            targetArea.split(Horizontal)
-            targetArea.areas[1].movePanel(dragPanel)
-            targetArea.areas[0].movePanels(targetArea.panels)
-          of East:
-            targetArea.split(Vertical)
-            targetArea.areas[1].movePanel(dragPanel)
-            targetArea.areas[0].movePanels(targetArea.panels)
-          of West:
-            targetArea.split(Vertical)
-            targetArea.areas[0].movePanel(dragPanel)
-            targetArea.areas[1].movePanels(targetArea.panels)
+        of Header:
+          let (idx, _) = targetArea.getTabInsertInfo(window.mousePos.vec2)
+          targetArea.insertPanel(dragPanel, idx)
+        of Body:
+          targetArea.movePanel(dragPanel)
+        of North:
+          targetArea.split(Horizontal)
+          targetArea.areas[0].movePanel(dragPanel)
+          targetArea.areas[1].movePanels(targetArea.panels)
+        of South:
+          targetArea.split(Horizontal)
+          targetArea.areas[1].movePanel(dragPanel)
+          targetArea.areas[0].movePanels(targetArea.panels)
+        of East:
+          targetArea.split(Vertical)
+          targetArea.areas[1].movePanel(dragPanel)
+          targetArea.areas[0].movePanels(targetArea.panels)
+        of West:
+          targetArea.split(Vertical)
+          targetArea.areas[0].movePanel(dragPanel)
+          targetArea.areas[1].movePanels(targetArea.panels)
 
         rootArea.removeBlankAreas()
       dragPanel = nil
