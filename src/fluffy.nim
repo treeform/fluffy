@@ -964,12 +964,13 @@ proc computeTraceStats(): seq[EventStats] =
     result.add(stats)
   result.sort(proc(a, b: EventStats): int = cmp(b.totalTime, a.totalTime))
 
-var cachedTraceStats: seq[EventStats]
-var traceStatsComputed = false
-var lastSelectedEventIndex = -1
-var treemapGroups: seq[TreemapGroup]
-var treemapLastRange: tuple[active: bool, start: float, finish: float]
-var treemapNeedsUpdate = true
+var
+  cachedTraceStats: seq[EventStats]
+  traceStatsComputed = false
+  lastSelectedEventIndex = -1
+  treemapGroups: seq[TreemapGroup]
+  treemapLastRange: tuple[active: bool, start: float, finish: float]
+  treemapNeedsUpdate = true
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   ## Draw the trace statistics table panel with sortable columns.
