@@ -114,6 +114,7 @@ var
   timelinePanStartOffset: float
 
 proc snapToPixels(rect: Rect): Rect =
+  ## Snap a rectangle to pixel boundaries.
   rect(
     rect.x.round,
     rect.y.round,
@@ -312,7 +313,6 @@ proc scan*(area: Area): (Area, AreaScan, Rect) =
   visit(rootArea)
   return (targetArea, areaScan, resRect)
 
-# Drawing
 proc drawAreaRecursive(area: Area, r: Rect) =
   area.rect = r.snapToPixels()
 
@@ -459,7 +459,7 @@ proc drawPanels() =
         rootArea.removeBlankAreas()
       dragPanel = nil
     else:
-      # Dragging
+      # Dragging the panel to a new location.
       let (targetArea, areaScan, rect) = rootArea.scan()
       dropHighlight = rect
       showDropHighlight = true
@@ -483,6 +483,7 @@ proc drawPanels() =
     discard sk.drawText("Default", label, window.mousePos.vec2 + vec2(18, 14), rgbx(255, 255, 255, 255))
 
 proc nameToColor(name: string): ColorRGBX =
+  ## Map a name to a deterministic color from the palette.
   let hash = abs(name.hash.int)
   FlatUIColors[hash mod FlatUIColors.len]
 
@@ -502,6 +503,7 @@ proc calculateNiceInterval(visibleDuration: float, targetTicks: int = 10): float
   return niceMult * magnitude
 
 proc formatTickTime(tickInterval: float, tickTime: float): string =
+  ## Format a tick time as a human-readable millisecond string.
   if tickInterval >= 100.0:
     &"{(tickTime / 1000.0):.1f}ms"
   elif tickInterval >= 10.0:
@@ -523,6 +525,7 @@ proc formatBytes(bytes: int): string =
     &"{bytes} B"
 
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
+  ## Draw the trace timeline panel with ruler, events, and range selection.
   frame(frameId, contentPos, contentSize):
     let mousePos = window.mousePos.vec2
     let contentRect = rect(contentPos.x, contentPos.y, contentSize.x, contentSize.y)
@@ -716,7 +719,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         if bounds.x == prevBounds.x and bounds.y == prevBounds.y and
           bounds.w == prevBounds.w and bounds.h == prevBounds.h:
           # As an optimization, skip drawing in the same place twice.
-          # This is really common when events gets very tiny.
+          # This is really common when events get very tiny.
           inc skips
         else:
           prevBounds = bounds
@@ -906,7 +909,7 @@ proc computeTraceStats(): seq[EventStats] =
       if rangeSelectionActive and (eventEnd <= rangeStart or eventStart >= rangeEnd):
         continue
 
-      # Clip the event to the range
+      # Clip the event to the range.
       let clippedEvent = clipEventToRange(eventStart, eventEnd)
       if clippedEvent.duration == 0:
         continue
@@ -918,11 +921,11 @@ proc computeTraceStats(): seq[EventStats] =
       for j in (i+1)..<trace.traceEvents.len:
         let child = trace.traceEvents[j]
 
-        # If child starts after parent ends, we're done
+        # If child starts after parent ends, we are done.
         if child.ts >= eventEnd:
           break
 
-        # If child starts within parent, add its range (clipped to parent bounds and range)
+        # If child starts within parent, add its range clipped to parent bounds and range.
         if child.ts >= eventStart:
           let childStart = max(child.ts, clippedEvent.start)
           let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
@@ -969,8 +972,9 @@ var treemapLastRange: tuple[active: bool, start: float, finish: float]
 var treemapNeedsUpdate = true
 
 proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
+  ## Draw the trace statistics table panel with sortable columns.
   frame(frameId, contentPos, contentSize):
-    # Check if range has changed
+    # Check if range has changed.
     let currentRange = (
       active: rangeSelectionActive,
       start: min(rangeSelectionStart, rangeSelectionEnd),
@@ -1094,11 +1098,13 @@ proc drawTraceTable(panel: Panel, frameId: string, contentPos: Vec2, contentSize
       rowY += 25
 
 proc drawAllocNumbers(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
+  ## Draw the allocation count panel placeholder.
   frame(frameId, contentPos, contentSize):
     h1text("Alloc Numbers")
     text("This is the alloc numbers")
 
 proc drawAllocSize(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
+  ## Draw the allocation size panel placeholder.
   frame(frameId, contentPos, contentSize):
     h1text("Alloc Size")
     text("This is the alloc size")
@@ -1300,7 +1306,7 @@ proc drawMemoryTreemap(panel: Panel, frameId: string, contentPos: Vec2, contentS
       discard sk.drawText("Default", tip, tipPos, rgbx(255, 255, 255, 255))
 
 proc loadTraceFile(filePath: string) =
-  ## Load a trace file and reset related state
+  ## Load a trace file and reset related state.
   try:
     echo "Loading trace file: ", filePath
     trace = readFile(filePath).fromJson(Trace)
@@ -1333,6 +1339,7 @@ proc loadTraceFile(filePath: string) =
     echo "Error loading trace file: ", e.msg
 
 proc initRootArea() =
+  ## Initialize the root area with default panel layout.
   randomize()
   rootArea = Area()
   rootArea.split(Horizontal)
