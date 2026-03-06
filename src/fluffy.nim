@@ -6,7 +6,7 @@ let builder = newAtlasBuilder(1024, 4)
 builder.addDir("data/", "data/")
 builder.addFont("data/IBMPlexSans-Regular.ttf", "H1", 32.0)
 builder.addFont("data/IBMPlexSans-Regular.ttf", "Default", 18.0, subpixelSteps = 10)
-builder.write("dist/atlas.png", "dist/atlas.json")
+builder.write("dist/atlas.png")
 let window = newWindow(
   "Fluffy Nim Profiler",
   ivec2(1200, 800),
@@ -16,7 +16,7 @@ let window = newWindow(
 makeContextCurrent(window)
 loadExtensions()
 
-let sk = newSilky("dist/atlas.png", "dist/atlas.json")
+let sk = newSilky("dist/atlas.png")
 
 type
   AreaLayout = enum
