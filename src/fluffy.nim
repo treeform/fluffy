@@ -16,7 +16,7 @@ let window = newWindow(
 makeContextCurrent(window)
 loadExtensions()
 
-let sk = newSilky("dist/atlas.png")
+let sk = newSilky(window, "dist/atlas.png")
 
 type
   AreaLayout = enum
