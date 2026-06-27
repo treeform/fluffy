@@ -1,6 +1,7 @@
 import
   std/[algorithm, hashes, math, os, random, strformat, tables],
-  bumpy, chroma, jsony, opengl, silky, vmath, windy
+  bumpy, chroma, jsony, opengl, silky, vmath, windy,
+  fluffy/timelines
 
 let builder = newAtlasBuilder(1024, 4)
 builder.addDir("data/", "data/")
@@ -574,6 +575,10 @@ proc formatCount(n: int): string =
   else:
     $n
 
+proc span(event: TraceEvent): TraceSpan =
+  ## Return the timeline span for an event.
+  TraceSpan(start: event.ts, finish: event.ts + event.dur)
+
 proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentSize: Vec2) =
   ## Draw the trace timeline panel with ruler, events, and range selection.
   frame(frameId, contentPos, contentSize):
@@ -715,14 +720,12 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
     var clickedOnEvent = false
     if isMouseOver and window.buttonPressed[MouseLeft] and not timelinePanning and dragPanel == nil and not rangeSelectionDragging:
       # Check if we clicked on any event.
-      var stack2: seq[tuple[event: TraceEvent, index: int]]
+      var stack2: seq[TraceSpan]
       for i, event in trace.traceEvents:
-        while stack2.len > 0 and stack2[^1].event.ts + stack2[^1].event.dur <= event.ts:
-          discard stack2.pop()
-
+        let eventSpan = event.span
         let x = (event.ts - firstTs) * scale + panPixels
         let w = max(1, event.dur * scale)
-        let level = stack2.len.float * Height + rulerHeight
+        let level = stack2.nestingDepth(eventSpan).float * Height + rulerHeight
 
         # Use 'at' offset to match drawing coordinates.
         let eventRect = rect(at.x + x, at.y + level, w, Height)
@@ -730,7 +733,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           clickedEventIndex = i
           clickedOnEvent = true
 
-        stack2.add((event: event, index: i))
+        stack2.add(eventSpan)
 
       # Update selection.
       if clickedEventIndex >= 0:
@@ -743,17 +746,16 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
         if not mousePos.overlaps(rulerRect):
           rangeSelectionActive = false
 
-    var stack: seq[TraceEvent]
+    var stack: seq[TraceSpan]
     var prevBounds = rect(0, 0, 0, 0)
     var skips = 0
     var hoveredEventIndex = -1
     var hoveredEventRect: Rect
     for i, event in trace.traceEvents:
-      while stack.len > 0 and stack[^1].ts + stack[^1].dur <= event.ts:
-        discard stack.pop()
+      let eventSpan = event.span
       let x = (event.ts - firstTs) * scale + panPixels
       let w = max(1, event.dur * scale)
-      let level = stack.len.float * Height + rulerHeight;
+      let level = stack.nestingDepth(eventSpan).float * Height + rulerHeight
 
       # Only draw if visible in the viewport.
       if x + w >= 0 and x <= contentSize.x:
@@ -782,7 +784,7 @@ proc drawTraceTimeline(panel: Panel, frameId: string, contentPos: Vec2, contentS
           hoveredEventIndex = i
           hoveredEventRect = bounds
 
-      stack.add(event)
+      stack.add(eventSpan)
     sk.popClipRect()
 
     # Draw hover highlight and tooltip outside the clip rect.
@@ -814,8 +816,9 @@ proc computeEventSelfMems() =
   # Use a stack to track parent-child relationships.
   var stack: seq[int] # Stack of event indices.
   for i, event in trace.traceEvents:
+    let eventSpan = event.span
     while stack.len > 0 and
-        trace.traceEvents[stack[^1]].ts + trace.traceEvents[stack[^1]].dur <= event.ts:
+        not trace.traceEvents[stack[^1]].span.contains(eventSpan):
       discard stack.pop()
 
     # If there's a parent on the stack, subtract this event's mem from it.
@@ -912,7 +915,7 @@ proc computeTraceStats(): seq[EventStats] =
     if clippedEvent.duration == 0:
       return result
 
-    # Collect all child event time ranges (events that start within this event's duration).
+    # Collect all child event time ranges.
     # Clip children to both the parent bounds AND the range.
     var childRanges: seq[tuple[start: float, finish: float]]
 
@@ -923,8 +926,8 @@ proc computeTraceStats(): seq[EventStats] =
       if child.ts >= eventEnd:
         break
 
-      # If child starts within parent, add its range (clipped to parent bounds and range).
-      if child.ts >= eventStart:
+      # If child is inside parent, add its range clipped to parent bounds and range.
+      if event.span.contains(child.span):
         let childStart = max(child.ts, clippedEvent.start)
         let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
 
@@ -970,7 +973,7 @@ proc computeTraceStats(): seq[EventStats] =
       if clippedEvent.duration == 0:
         continue
 
-      # Collect all child event time ranges: events that start within this event's duration.
+      # Collect all child event time ranges.
       # Clip children to both the parent bounds AND the range.
       var childRanges: seq[tuple[start: float, finish: float]]
 
@@ -981,8 +984,8 @@ proc computeTraceStats(): seq[EventStats] =
         if child.ts >= eventEnd:
           break
 
-        # If child starts within parent, add its range clipped to parent bounds and range.
-        if child.ts >= eventStart:
+        # If child is inside parent, add its range clipped to parent bounds and range.
+        if event.span.contains(child.span):
           let childStart = max(child.ts, clippedEvent.start)
           let childEnd = min(child.ts + child.dur, min(eventEnd, clippedEvent.finish))
 
