@@ -151,7 +151,7 @@ macro measure*(fn: untyped) =
 
 proc dumpMeasures*(tracePath = "") =
   ## Dumps performance measurements if total time exceeds threshold.
-  if tracePath.len > 0 and not traceData.isNil:
+  if tracePath.len > 0 and not traceData.isNil and traceData.events.len > 0:
     for (name, nameId) in nameIds.pairs:
       traceData.names[nameId] = name
 
@@ -177,3 +177,5 @@ proc dumpMeasures*(tracePath = "") =
     let jsonText = toJson(chromeTrace)
     writeFile(tracePath, jsonText)
     echo "Trace written to ", tracePath
+  elif tracePath.len > 0:
+    echo "Trace dump skipped: no events recorded"
