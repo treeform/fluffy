@@ -42,6 +42,10 @@ type
     names: Table[int, string]
     events: seq[Event]
 
+const
+  MaxTraceEvents* = 10_000
+    ## Caps one capture so a long F2 session does not write a huge file.
+
 var
   nameIds: Table[string, int]
   tracingEnabled: bool
@@ -51,6 +55,7 @@ var
   traceCategory: string
   traceData: Trace
   traceStarts: seq[Event]
+  traceCapped: bool
 
 proc getTicks*(): int =
   ## Gets accurate time.
@@ -92,6 +97,7 @@ proc startTrace*(pid = 1, tid = 1, category = "measure") =
     traceData = Trace(events: @[])
   else:
     traceData.events.setLen(0)
+  traceCapped = false
 
   echo "Trace started"
   echo " trace events: ", traceData.events.len
@@ -131,6 +137,11 @@ proc measurePop*() =
   if tracingEnabled:
     let now = getTicks().float
     let eventStart = traceStarts.pop()
+    if traceData.events.len >= MaxTraceEvents:
+      if not traceCapped:
+        echo "Trace event cap reached: ", MaxTraceEvents
+        traceCapped = true
+      return
     traceData.events.add(Event(
       nameId: eventStart.nameId,
       ts: eventStart.ts,
